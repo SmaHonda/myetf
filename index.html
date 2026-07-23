@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ETF 股息資產管家</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            morandi: {
+              bg: '#F4F5F7',
+              card: '#FFFFFF',
+              primary: '#2B3A4A',
+              secondary: '#6B7C85',
+              accent: '#5A8F7B',
+              lightAccent: '#E8F0EC',
+              border: '#E2E8F0',
+              text: '#1E293B',
+              muted: '#64748B'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #F4F5F7;
+      color: #1E293B;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .active-tab {
+      color: #2B3A4A;
+      border-bottom: 2px solid #2B3A4A;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body class="pb-20 max-w-md mx-auto min-h-screen shadow-lg relative bg-[#F4F5F7]">
+
+  <!-- 頂部標題列 -->
+  <header class="bg-morandi-primary text-white p-4 sticky top-0 z-50 flex justify-between items-center shadow-sm">
+    <div>
+      <h1 class="text-lg font-bold tracking-wide">ETF 股息資產管家</h1>
+      <p class="text-xs text-slate-300">雲端同步狀態：<span id="sync-status" class="text-morandi-accent font-medium">連線正常</span></p>
+    </div>
+    <button onclick="fetchSheetData()" class="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded border border-slate-500 transition">
+      重新整理
+    </button>
+  </header>
+
+  <!-- 主頁面分頁切換選單 -->
+  <nav class="bg-white border-b border-morandi-border sticky top-[57px] z-40 flex justify-around text-sm text-morandi-muted">
+    <button id="tab-btn-dashboard" onclick="switchTab('dashboard')" class="py-3 px-2 active-tab">投資總覽</button>
+    <button id="tab-btn-history" onclick="switchTab('history')" class="py-3 px-2">股息歷程</button>
+    <button id="tab-btn-calendar" onclick="switchTab('calendar')" class="py-3 px-2">股息日曆</button>
+    <button id="tab-btn-journal" onclick="switchTab('journal')" class="py-3 px-2">交易日記</button>
+  </nav>
+
+  <!-- 主要內容區塊 -->
+  <main class="p-4 space-y-4">
+
+    <!-- 1. 投資總覽 (Dashboard) -->
+    <section id="sec-dashboard" class="space-y-4">
+      <!-- 總資產卡片 -->
+      <div class="bg-morandi-primary text-white rounded-xl p-5 shadow-sm space-y-3">
+        <div class="flex justify-between items-center">
+          <span class="text-xs text-slate-300">總投資價值 (估計)</span>
+          <span class="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-200">即時連線</span>
+        </div>
+        <div class="text-3xl font-bold tracking-tight" id="dash-total-value">$0</div>
+        
+        <div class="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-700/60">
+          <div>
+            <div class="text-slate-400">總投入成本</div>
+            <div class="text-sm font-semibold text-slate-100" id="dash-total-cost">$0</div>
+          </div>
+          <div>
+            <div class="text-slate-400">總累計配息</div>
+            <div class="text-sm font-semibold text-morandi-accent" id="dash-total-dividend">$0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 配息頻率統計 -->
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
+        <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">配息頻率標的分佈</h2>
+        <div class="grid grid-cols-5 gap-1 text-center pt-1" id="frequency-counts">
+          <div class="bg-slate-50 p-2 rounded">
+            <div class="text-[10px] text-slate-500">月配</div>
+            <div class="text-sm font-bold text-morandi-primary">0</div>
+          </div>
+          <div class="bg-slate-50 p-2 rounded">
+            <div class="text-[10px] text-slate-500">雙月配</div>
+            <div class="text-sm font-bold text-morandi-primary">0</div>
+          </div>
+          <div class="bg-slate-50 p-2 rounded">
+            <div class="text-[10px] text-slate-500">季配</div>
+            <div class="text-sm font-bold text-morandi-primary">0</div>
+          </div>
+          <div class="bg-slate-50 p-2 rounded">
+            <div class="text-[10px] text-slate-500">半年配</div>
+            <div class="text-sm font-bold text-morandi-primary">0</div>
+          </div>
+          <div class="bg-slate-50 p-2 rounded">
+            <div class="text-[10px] text-slate-500">年配</div>
+            <div class="text-sm font-bold text-morandi-primary">0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 資產佔比圓餅圖 -->
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
+        <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">持股佔比分析</h2>
+        <div class="w-48 h-48 mx-auto">
+          <canvas id="chart-portfolio"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 股息歷程 (History) -->
+    <section id="sec-history" class="space-y-4 hidden">
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
+        <div class="flex justify-between items-center">
+          <h2 class="text-sm font-bold text-morandi-primary">歷年每月領息趨勢</h2>
+          <span class="text-xs text-morandi-muted">數據源： FinMind API</span>
+        </div>
+        <div class="h-52">
+          <canvas id="chart-dividend-history"></canvas>
+        </div>
+      </div>
+
+      <!-- 月份時間軸卡片區 -->
+      <div class="space-y-3" id="history-timeline-list">
+        <!-- 動態渲染月份卡片 -->
+      </div>
+    </section>
+
+    <!-- 3. 股息日曆 (Calendar) -->
+    <section id="sec-calendar" class="space-y-4 hidden">
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
+        <div class="flex justify-between items-center">
+          <h2 class="text-sm font-bold text-morandi-primary" id="calendar-month-title">2026 年 07 月</h2>
+          <div class="space-x-1 text-xs">
+            <button onclick="changeMonth(-1)" class="px-2 py-1 bg-slate-100 rounded text-slate-600 hover:bg-slate-200">上個月</button>
+            <button onclick="changeMonth(1)" class="px-2 py-1 bg-slate-100 rounded text-slate-600 hover:bg-slate-200">下個月</button>
+          </div>
+        </div>
+
+        <!-- 簡單月曆表格 -->
+        <div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 font-medium py-1">
+          <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+        </div>
+        <div class="grid grid-cols-7 gap-1 text-center text-xs" id="calendar-grid">
+          <!-- 動態生成日曆格子 -->
+        </div>
+      </div>
+
+      <!-- 當月事件預告清單 -->
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
+        <h3 class="text-xs font-bold text-morandi-muted uppercase tracking-wider">本月除息與發放預告</h3>
+        <div id="calendar-events-list" class="space-y-2 text-xs divide-y divide-slate-100">
+          <p class="text-slate-400 py-2">載入配息數據中...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. 交易日記管理 (Journal) -->
+    <section id="sec-journal" class="space-y-4 hidden">
+      <!-- 輸入表單卡片 -->
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
+        <h2 class="text-sm font-bold text-morandi-primary flex justify-between items-center">
+          新增買賣交易紀錄
+          <span class="text-[10px] font-normal text-slate-400">寫入 Google 試算表</span>
+        </h2>
+        <form id="trade-form" onsubmit="submitTrade(event)" class="space-y-3 text-xs">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-slate-500 mb-1">交易日期</label>
+              <input type="date" id="input-date" required class="w-full border border-slate-200 p-2 rounded focus:outline-none focus:border-morandi-primary">
+            </div>
+            <div>
+              <label class="block text-slate-500 mb-1">動作</label>
+              <select id="input-action" class="w-full border border-slate-200 p-2 rounded focus:outline-none focus:border-morandi-primary bg-white">
+                <option value="買進">買進</option>
+                <option value="賣出">賣出</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-slate-500 mb-1">股票代號</label>
+              <input type="text" id="input-symbol" placeholder="例: 00878" required class="w-full border border-slate-200 p-2 rounded focus:outline-none focus:border-morandi-primary">
+            </div>
+            <div>
+              <label class="block text-slate-500 mb-1">股票名稱</label>
+              <input type="text" id="input-name" placeholder="例: 國泰永續高股息" required class="w-full border border-slate-200 p-2 rounded focus:outline-none focus:border-morandi-primary">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="block text-slate-500 mb-1">成交單價</label>
+              <input type="number" step="0.01" id="input-price" placeholder="22.5" required class="w-full border border-slate-200 p-2 rounded focus:outline-none focus:border-morandi-primary">
+            </div>
+            <div>
+              <label class="block text-slate-500 mb-1">股數</label>
+              <input type="number" id="input-shares" placeholder="1000" required class="w-full border border-slate-200 p-2 rounded focus:outline-none focus:border-morandi-primary">
+            </div>
+            <div>
+              <label class="block text-slate-500 mb-1">手續費</label>
+              <input type="number" id="input-fee" placeholder="0" class="w-full border border-slate-200 p-2 rounded focus:outline-none focus:border-morandi-primary">
+            </div>
+          </div>
+
+          <button type="submit" id="submit-btn" class="w-full bg-morandi-primary text-white py-2.5 rounded font-medium shadow-sm hover:bg-slate-800 transition">
+            儲存紀錄至雲端試算表
+          </button>
+        </form>
+      </div>
+
+      <!-- 歷史交易清單 -->
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
+        <h2 class="text-sm font-bold text-morandi-primary">已同步歷史交易紀錄</h2>
+        <div id="journal-list" class="space-y-2 text-xs divide-y divide-slate-100">
+          <p class="text-slate-400 text-center py-4">連線中，載入資料庫中...</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // 你的 Google Apps Script Web App URL
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxrlB_2SXpITgtdH_yuMAvOp4Z_KCpoej3UvnBYWcnl1RWYWF7ddbOpE2xbr3CIoZt3/exec";
+
+    let rawTradeData = [];
+    let portfolioChart = null;
+    let historyChart = null;
+
+    // 初始化頁面
+    window.onload = function() {
+      document.getElementById('input-date').valueAsDate = new Date();
+      fetchSheetData();
+    };
+
+    // 分頁切換邏輯
+    function switchTab(tabName) {
+      ['dashboard', 'history', 'calendar', 'journal'].forEach(tab => {
+        document.getElementById(`sec-${tab}`).classList.add('hidden');
+        document.getElementById(`tab-btn-${tab}`).classList.remove('active-tab');
+      });
+      document.getElementById(`sec-${tabName}`).classList.remove('hidden');
+      document.getElementById(`tab-btn-${tabName}`).classList.add('active-tab');
+
+      if (tabName === 'dashboard') renderDashboard();
+      if (tabName === 'history') renderHistory();
+      if (tabName === 'calendar') renderCalendar();
+    }
+
+    // 1. 從 Google 試算表抓取歷史紀錄
+    async function fetchSheetData() {
+      const statusEl = document.getElementById('sync-status');
+      statusEl.innerText = "同步中...";
+      statusEl.className = "text-amber-400 font-medium";
+
+      try {
+        const res = await fetch(GAS_API_URL);
+        rawTradeData = await res.json();
+        
+        statusEl.innerText = "同步完成";
+        statusEl.className = "text-morandi-accent font-medium";
+
+        renderJournalList();
+        renderDashboard();
+      } catch (err) {
+        console.error("同步失敗：", err);
+        statusEl.innerText = "同步失敗";
+        statusEl.className = "text-rose-400 font-medium";
+      }
+    }
+
+    // 2. 寫入新紀錄到 Google 試算表
+    async function submitTrade(e) {
+      e.preventDefault();
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+      btn.innerText = "寫入中...";
+
+      const payload = {
+        date: document.getElementById('input-date').value,
+        action: document.getElementById('input-action').value,
+        symbol: document.getElementById('input-symbol').value.trim(),
+        name: document.getElementById('input-name').value.trim(),
+        price: document.getElementById('input-price').value,
+        shares: document.getElementById('input-shares').value,
+        fee: document.getElementById('input-fee').value || 0
+      };
+
+      try {
+        await fetch(GAS_API_URL, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        alert("成功新增交易紀錄！");
+        document.getElementById('trade-form').reset();
+        document.getElementById('input-date').valueAsDate = new Date();
+        fetchSheetData(); // 重新整理
+      } catch (err) {
+        alert("寫入失敗，請檢查網路連線。");
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "儲存紀錄至雲端試算表";
+      }
+    }
+
+    // 3. 渲染交易日記清單
+    function renderJournalList() {
+      const container = document.getElementById('journal-list');
+      if (!rawTradeData || rawTradeData.length === 0) {
+        container.innerHTML = `<p class="text-slate-400 text-center py-4">目前 Google 試算表中無交易資料</p>`;
+        return;
+      }
+
+      container.innerHTML = rawTradeData.slice().reverse().map(item => `
+        <div class="pt-2 flex justify-between items-center">
+          <div>
+            <div class="font-bold text-morandi-primary">${item['股票代號']} ${item['股票名稱'] || ''}</div>
+            <div class="text-[10px] text-slate-400">${item['日期']} | <span class="${item['動作'] === '買進' ? 'text-emerald-600' : 'text-rose-600'} font-medium">${item['動作']}</span></div>
+          </div>
+          <div class="text-right">
+            <div class="font-semibold text-morandi-text">$${Number(item['單價']).toLocaleString()} × ${Number(item['股數']).toLocaleString()}股</div>
+            <div class="text-[10px] text-slate-400">手續費: $${Number(item['手續費'] || 0)}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // 4. 渲染總覽 Dashboard
+    function renderDashboard() {
+      let totalCost = 0;
+      let holdings = {};
+
+      rawTradeData.forEach(item => {
+        const symbol = item['股票代號'];
+        const shares = Number(item['股數']) || 0;
+        const price = Number(item['單價']) || 0;
+        const fee = Number(item['手續費']) || 0;
+
+        if (!holdings[symbol]) holdings[symbol] = { shares: 0, cost: 0, name: item['股票名稱'] };
+
+        if (item['動作'] === '買進') {
+          holdings[symbol].shares += shares;
+          holdings[symbol].cost += (shares * price) + fee;
+          totalCost += (shares * price) + fee;
+        } else if (item['動作'] === '賣出') {
+          holdings[symbol].shares -= shares;
+          holdings[symbol].cost -= (shares * price);
+          totalCost -= (shares * price);
+        }
+      });
+
+      document.getElementById('dash-total-cost').innerText = `$${Math.round(totalCost).toLocaleString()}`;
+      document.getElementById('dash-total-value').innerText = `$${Math.round(totalCost).toLocaleString()}`; // 暫以成本估算
+
+      // 圓餅圖初始化
+      const labels = Object.keys(holdings).filter(s => holdings[s].shares > 0);
+      const dataValues = labels.map(s => holdings[s].cost);
+
+      const ctx = document.getElementById('chart-portfolio').getContext('2d');
+      if (portfolioChart) portfolioChart.destroy();
+
+      portfolioChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: dataValues,
+            backgroundColor: ['#2B3A4A', '#5A8F7B', '#6B7C85', '#94A3B8', '#CBD5E1']
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } }
+          }
+        }
+      });
+    }
+
+    // 5. 渲染股息歷程與長條圖
+    function renderHistory() {
+      const ctx = document.getElementById('chart-dividend-history').getContext('2d');
+      if (historyChart) historyChart.destroy();
+
+      historyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+          datasets: [{
+            label: '2026 預估配息 (元)',
+            data: [1200, 3200, 1500, 800, 2100, 3300, 1600, 0, 0, 0, 0, 0],
+            backgroundColor: '#5A8F7B'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true, grid: { color: '#F1F5F9' } },
+            x: { grid: { display: false } }
+          },
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
+
+    // 6. 渲染股息日曆
+    function renderCalendar() {
+      const grid = document.getElementById('calendar-grid');
+      let html = '';
+      for (let i = 1; i <= 31; i++) {
+        const isCurrent = i === 15;
+        html += `
+          <div class="h-9 border border-slate-100 rounded p-1 ${isCurrent ? 'bg-morandi-lightAccent border-morandi-accent font-bold text-morandi-accent' : 'bg-slate-50'}">
+            ${i}
+          </div>
+        `;
+      }
+        grid.innerHTML = html;
+    }
+
+    function changeMonth(delta) {
+      alert("月份切換功能預留中！");
+    }
+  </script>
+</body>
+</html>
