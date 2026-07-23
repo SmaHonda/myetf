@@ -90,7 +90,7 @@
 
       <!-- 持股統計 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
-        <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">持股標的分佈</h2>
+        <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">持股統計</h2>
         <div class="grid grid-cols-4 gap-2 text-center pt-1" id="holding-summary-counts">
           <div class="bg-slate-50 p-2 rounded">
             <div class="text-[10px] text-slate-500">持股筆數</div>
@@ -247,8 +247,18 @@
     let portfolioChart = null;
     let historyChart = null;
 
-    // 快取機制，防止重複發送 API 請求
     const dividendCache = {};
+
+    // 格式化股票代號 (清理空白，並去除 fronting quotes)
+    function cleanSymbol(rawSymbol) {
+      if (!rawSymbol) return "";
+      let str = String(rawSymbol).trim().replace(/['"']/g, '');
+      // 針對台股數字代號進行補零（例如 878 -> 00878）
+      if (/^\d+$/.test(str)) {
+        return str.padStart(5, '0');
+      }
+      return str;
+    }
 
     window.onload = function() {
       document.getElementById('input-date').valueAsDate = new Date();
@@ -268,9 +278,10 @@
       if (tabName === 'calendar') renderCalendar();
     }
 
-    // 從 FinMind Open API 動態抓取指定股票的歷史配息資料
+    // 從 FinMind API 免費抓取歷史配息
     async function fetchETFDividendsFromAPI(symbol) {
-      const formattedSymbol = String(symbol).padStart(5, '0').slice(-5);
+      const formattedSymbol = cleanSymbol(symbol);
+      if (!formattedSymbol) return [];
       
       if (dividendCache[formattedSymbol]) {
         return dividendCache[formattedSymbol];
@@ -282,13 +293,20 @@
         const res = await fetch(url);
         const json = await res.json();
         
-        if (json.msg === "success" && json.data) {
+        if (json.msg === "success" && Array.isArray(json.data)) {
           const parsedData = json.data.map(item => {
-            const cashAmount = (Number(item.CashEarningsDistribution) || 0) + (Number(item.CashStatutorySurplus) || 0);
+            // 抓取現金股利 (涵蓋盈餘分配與公積發放)
+            const cashEarnings = Number(item.CashEarningsDistribution) || 0;
+            const cashStatutory = Number(item.CashStatutorySurplus) || 0;
+            const totalCash = cashEarnings + cashStatutory;
+
+            const exDate = item.ExDividendDate || item.Date;
+            const payDate = item.CashDividendPaymentDate || exDate;
+
             return {
-              exDate: item.ExDividendDate,
-              payDate: item.CashDividendPaymentDate || item.ExDividendDate,
-              amount: cashAmount
+              exDate: exDate,
+              payDate: payDate,
+              amount: totalCash
             };
           }).filter(d => d.amount > 0 && d.exDate);
 
@@ -313,7 +331,6 @@
         
         statusEl.innerText = "計算配息中...";
         
-        // 自動向 API 抓取配息數據並計算
         await calculateUserDividends();
 
         statusEl.innerText = "同步完成";
@@ -332,32 +349,40 @@
     async function calculateUserDividends() {
       calculatedDividends = [];
 
+      // 篩選買進紀錄
       const buyTrades = rawTradeData.filter(t => t['動作'] === '買進');
-      const uniqueSymbols = [...new Set(buyTrades.map(t => String(t['股票代號']).padStart(5, '0').slice(-5)))];
+      const uniqueSymbols = [...new Set(buyTrades.map(t => cleanSymbol(t['股票代號'])))];
 
-      // 依序抓取所有持有的 ETF 歷史配息
+      // 依序向 API 抓取資料
       for (const symbol of uniqueSymbols) {
         await fetchETFDividendsFromAPI(symbol);
       }
 
       buyTrades.forEach(trade => {
-        const symbol = String(trade['股票代號']).padStart(5, '0').slice(-5);
+        const symbol = cleanSymbol(trade['股票代號']);
         const divRecords = dividendCache[symbol] || [];
-        const buyDate = new Date(trade['日期']);
+        
+        // 確保日期可被正常解析 (將字符串格式化)
+        const buyDateStr = String(trade['日期']).split('T')[0];
+        const buyDate = new Date(buyDateStr);
         const shares = Number(trade['股數']) || 0;
 
         divRecords.forEach(div => {
           const exDate = new Date(div.exDate);
-          // 買進日期在除息日之前（或當天），即可領取該次配息
-          if (buyDate <= exDate) {
+          
+          // 當買進日期早於或等於除息日，即可領取該次配息
+          if (!isNaN(buyDate) && !isNaN(exDate) && buyDate <= exDate) {
             const totalPayout = Math.round(shares * div.amount);
+            const payDateStr = div.payDate || div.exDate;
+            const dateParts = payDateStr.split('-');
+
             calculatedDividends.push({
               symbol: symbol,
               name: trade['股票名稱'] || symbol,
               exDate: div.exDate,
-              payDate: div.payDate,
-              year: div.payDate.split('-')[0],
-              month: div.payDate.split('-')[1],
+              payDate: payDateStr,
+              year: dateParts[0],
+              month: dateParts[1],
               shares: shares,
               perShare: div.amount,
               totalPayout: totalPayout
@@ -413,7 +438,7 @@
       container.innerHTML = rawTradeData.slice().reverse().map(item => `
         <div class="pt-2 flex justify-between items-center">
           <div>
-            <div class="font-bold text-morandi-primary">${String(item['股票代號']).padStart(5, '0')} ${item['股票名稱'] || ''}</div>
+            <div class="font-bold text-morandi-primary">${cleanSymbol(item['股票代號'])} ${item['股票名稱'] || ''}</div>
             <div class="text-[10px] text-slate-400">${item['日期']} | <span class="${item['動作'] === '買進' ? 'text-emerald-600' : 'text-rose-600'} font-medium">${item['動作']}</span></div>
           </div>
           <div class="text-right">
@@ -430,7 +455,7 @@
       let holdings = {};
 
       rawTradeData.forEach(item => {
-        const symbol = String(item['股票代號']).padStart(5, '0').slice(-5);
+        const symbol = cleanSymbol(item['股票代號']);
         const shares = Number(item['股數']) || 0;
         const price = Number(item['單價']) || 0;
         const fee = Number(item['手續費']) || 0;
