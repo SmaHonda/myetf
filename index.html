@@ -74,7 +74,7 @@
           <span class="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-200">即時同步</span>
         </div>
         <div class="text-3xl font-bold tracking-tight" id="dash-total-value">$0</div>
-        
+
         <div class="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-700/60">
           <div>
             <div class="text-slate-400">總投入成本</div>
@@ -238,13 +238,12 @@
     let portfolioChart = null;
     let historyChart = null;
 
+    // 修正重點：不再強制補零到 5 碼。
+    // 台股代號長度本來就不固定（2330 / 0050 / 0056 是 4 碼，00878 / 00713 是 5 碼），
+    // 只要單純清理空白與引號，保留原始代號即可，才能跟 FinMind 的 data_id 對得上。
     function cleanSymbol(rawSymbol) {
       if (!rawSymbol) return "";
-      let str = String(rawSymbol).trim().replace(/['"']/g, '');
-      if (/^\d+$/.test(str)) {
-        return str.padStart(5, '0');
-      }
-      return str;
+      return String(rawSymbol).trim().replace(/['"']/g, '');
     }
 
     window.onload = function() {
@@ -273,7 +272,7 @@
       try {
         const res = await fetch(GAS_API_URL, { method: 'GET', redirect: 'follow' });
         const resJson = await res.json();
-        
+
         // 解析 GAS 回傳的交易與配息資料
         if (Array.isArray(resJson)) {
           rawTradeData = resJson;
@@ -306,7 +305,7 @@
       buyTrades.forEach(trade => {
         const symbol = cleanSymbol(trade['股票代號']);
         const rawDivList = dividendDatabase[symbol] || [];
-        
+
         const buyDateStr = String(trade['日期']).split('T')[0];
         const buyDate = new Date(buyDateStr);
         const shares = Number(trade['股數']) || 0;
@@ -315,7 +314,7 @@
           const cashAmount = (Number(item.CashEarningsDistribution) || 0) + (Number(item.CashStatutorySurplus) || 0);
           const exDateStr = item.ExDividendDate || item.Date;
           const payDateStr = item.CashDividendPaymentDate || exDateStr;
-          
+
           if (cashAmount > 0 && exDateStr) {
             const exDate = new Date(exDateStr);
             if (!isNaN(buyDate) && !isNaN(exDate) && buyDate <= exDate) {
