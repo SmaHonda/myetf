@@ -270,7 +270,9 @@
       statusEl.className = "text-amber-400 font-medium";
 
       try {
-        const res = await fetch(GAS_API_URL, { method: 'GET', redirect: 'follow' });
+        // 加上時間戳記參數，避免 GET 請求被快取，確保每次都拿到最新資料
+        const noCacheUrl = GAS_API_URL + "?t=" + new Date().getTime();
+        const res = await fetch(noCacheUrl, { method: 'GET', redirect: 'follow' });
         const resJson = await res.json();
 
         // 解析 GAS 回傳的交易與配息資料
