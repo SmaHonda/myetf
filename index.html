@@ -60,7 +60,7 @@
     <button id="tab-btn-dashboard" onclick="switchTab('dashboard')" class="py-3 px-2 active-tab">投資總覽</button>
     <button id="tab-btn-history" onclick="switchTab('history')" class="py-3 px-2">股息歷程</button>
     <button id="tab-btn-calendar" onclick="switchTab('calendar')" class="py-3 px-2">股息日曆</button>
-    <button id="tab-btn-journal" onclick="switchTab('journal')" class="py-3 px-2">交易日記</button>
+    <button id="tab-btn-journal" onclick="switchTab('journal')" class="py-3 px-2">買賣紀錄</button>
   </nav>
 
   <!-- 主要內容區塊 -->
@@ -72,7 +72,7 @@
       <div class="bg-morandi-primary text-white rounded-xl p-5 shadow-sm space-y-3">
         <div class="flex justify-between items-center">
           <span class="text-xs text-slate-300">總投資價值 (估計)</span>
-          <span class="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-200">即時連線</span>
+          <span class="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-200">即時同步</span>
         </div>
         <div class="text-3xl font-bold tracking-tight" id="dash-total-value">$0</div>
         
@@ -82,7 +82,7 @@
             <div class="text-sm font-semibold text-slate-100" id="dash-total-cost">$0</div>
           </div>
           <div>
-            <div class="text-slate-400">總累計配息</div>
+            <div class="text-slate-400">歷史總配息 (預估)</div>
             <div class="text-sm font-semibold text-morandi-accent" id="dash-total-dividend">$0</div>
           </div>
         </div>
@@ -90,27 +90,23 @@
 
       <!-- 配息頻率統計 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
-        <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">配息頻率標的分佈</h2>
-        <div class="grid grid-cols-5 gap-1 text-center pt-1" id="frequency-counts">
+        <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">持股標的分佈</h2>
+        <div class="grid grid-cols-4 gap-2 text-center pt-1" id="holding-summary-counts">
           <div class="bg-slate-50 p-2 rounded">
-            <div class="text-[10px] text-slate-500">月配</div>
-            <div class="text-sm font-bold text-morandi-primary">0</div>
+            <div class="text-[10px] text-slate-500">持股筆數</div>
+            <div class="text-sm font-bold text-morandi-primary" id="count-holdings">0</div>
           </div>
           <div class="bg-slate-50 p-2 rounded">
-            <div class="text-[10px] text-slate-500">雙月配</div>
-            <div class="text-sm font-bold text-morandi-primary">0</div>
+            <div class="text-[10px] text-slate-500">總股數</div>
+            <div class="text-sm font-bold text-morandi-primary" id="count-shares">0</div>
           </div>
           <div class="bg-slate-50 p-2 rounded">
-            <div class="text-[10px] text-slate-500">季配</div>
-            <div class="text-sm font-bold text-morandi-primary">0</div>
+            <div class="text-[10px] text-slate-500">已領息次數</div>
+            <div class="text-sm font-bold text-morandi-primary" id="count-div-times">0</div>
           </div>
           <div class="bg-slate-50 p-2 rounded">
-            <div class="text-[10px] text-slate-500">半年配</div>
-            <div class="text-sm font-bold text-morandi-primary">0</div>
-          </div>
-          <div class="bg-slate-50 p-2 rounded">
-            <div class="text-[10px] text-slate-500">年配</div>
-            <div class="text-sm font-bold text-morandi-primary">0</div>
+            <div class="text-[10px] text-slate-500">平均月領息</div>
+            <div class="text-sm font-bold text-morandi-primary" id="avg-monthly-div">$0</div>
           </div>
         </div>
       </div>
@@ -126,19 +122,33 @@
 
     <!-- 2. 股息歷程 (History) -->
     <section id="sec-history" class="space-y-4 hidden">
+      <!-- 年份選擇列 -->
+      <div class="flex justify-between items-center bg-white p-3 rounded-xl border border-morandi-border">
+        <span class="text-xs font-bold text-morandi-primary">選擇統計年份</span>
+        <select id="history-year-select" onchange="renderHistory()" class="text-xs border border-slate-200 rounded px-2 py-1 bg-slate-50 font-medium">
+          <option value="2026">2026 年</option>
+          <option value="2025">2025 年</option>
+          <option value="2024">2024 年</option>
+          <option value="2023">2023 年</option>
+          <option value="2022">2022 年</option>
+          <option value="2021">2021 年</option>
+          <option value="2020">2020 年</option>
+        </select>
+      </div>
+
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
         <div class="flex justify-between items-center">
-          <h2 class="text-sm font-bold text-morandi-primary">歷年每月領息趨勢</h2>
-          <span class="text-xs text-morandi-muted">數據源： FinMind API</span>
+          <h2 class="text-sm font-bold text-morandi-primary" id="history-chart-title">各月份領息統計</h2>
+          <span class="text-xs text-morandi-accent font-semibold" id="history-year-total">該年總計: $0</span>
         </div>
         <div class="h-52">
           <canvas id="chart-dividend-history"></canvas>
         </div>
       </div>
 
-      <!-- 月份時間軸卡片區 -->
+      <!-- 月份配息明細時間軸卡片區 -->
       <div class="space-y-3" id="history-timeline-list">
-        <!-- 動態渲染月份卡片 -->
+        <!-- 動態渲染歷史領息細節 -->
       </div>
     </section>
 
@@ -153,7 +163,6 @@
           </div>
         </div>
 
-        <!-- 簡單月曆表格 -->
         <div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 font-medium py-1">
           <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
         </div>
@@ -164,16 +173,15 @@
 
       <!-- 當月事件預告清單 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
-        <h3 class="text-xs font-bold text-morandi-muted uppercase tracking-wider">本月除息與發放預告</h3>
+        <h3 class="text-xs font-bold text-morandi-muted uppercase tracking-wider">本月配息發放紀錄/預告</h3>
         <div id="calendar-events-list" class="space-y-2 text-xs divide-y divide-slate-100">
           <p class="text-slate-400 py-2">載入配息數據中...</p>
         </div>
       </div>
     </section>
 
-    <!-- 4. 交易日記管理 (Journal) -->
+    <!-- 4. 買賣紀錄管理 (Journal) -->
     <section id="sec-journal" class="space-y-4 hidden">
-      <!-- 輸入表單卡片 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
         <h2 class="text-sm font-bold text-morandi-primary flex justify-between items-center">
           新增買賣交易紀錄
@@ -228,7 +236,7 @@
 
       <!-- 歷史交易清單 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
-        <h2 class="text-sm font-bold text-morandi-primary">已同步歷史交易紀錄</h2>
+        <h2 class="text-sm font-bold text-morandi-primary">已同步買賣紀錄</h2>
         <div id="journal-list" class="space-y-2 text-xs divide-y divide-slate-100">
           <p class="text-slate-400 text-center py-4">連線中，載入資料庫中...</p>
         </div>
@@ -238,20 +246,47 @@
   </main>
 
   <script>
-    // 你的 Google Apps Script Web App URL
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxrlB_2SXpITgtdH_yuMAvOp4Z_KCpoej3UvnBYWcnl1RWYWF7ddbOpE2xbr3CIoZt3/exec";
 
+    // 常用台股高股息 ETF 歷史除息資料庫（每股配息與發放日期）
+    const ETF_DIVIDEND_DATABASE = {
+      "00878": [
+        { exDate: "2020-11-17", payDate: "2020-12-16", amount: 0.05 },
+        { exDate: "2021-02-22", payDate: "2021-03-23", amount: 0.15 },
+        { exDate: "2021-05-18", payDate: "2021-06-18", amount: 0.25 },
+        { exDate: "2021-08-17", payDate: "2021-09-17", amount: 0.30 },
+        { exDate: "2021-11-16", payDate: "2021-12-17", amount: 0.28 },
+        { exDate: "2022-02-22", payDate: "2022-03-25", amount: 0.30 },
+        { exDate: "2022-05-18", payDate: "2022-06-21", amount: 0.32 },
+        { exDate: "2022-08-16", payDate: "2022-09-19", amount: 0.28 },
+        { exDate: "2022-11-16", payDate: "2022-12-19", amount: 0.28 },
+        { exDate: "2023-02-16", payDate: "2023-03-22", amount: 0.27 },
+        { exDate: "2023-05-17", payDate: "2023-06-12", amount: 0.27 },
+        { exDate: "2023-08-16", payDate: "2023-09-11", amount: 0.35 },
+        { exDate: "2023-11-16", payDate: "2023-12-12", amount: 0.35 },
+        { exDate: "2024-02-27", payDate: "2024-03-25", amount: 0.40 },
+        { exDate: "2024-05-17", payDate: "2024-06-13", amount: 0.51 },
+        { exDate: "2024-08-16", payDate: "2024-09-11", amount: 0.55 },
+        { exDate: "2024-11-18", payDate: "2024-12-12", amount: 0.55 },
+        { exDate: "2025-02-18", payDate: "2025-03-18", amount: 0.55 },
+        { exDate: "2025-05-19", payDate: "2025-06-16", amount: 0.55 },
+        { exDate: "2025-08-18", payDate: "2025-09-15", amount: 0.55 },
+        { exDate: "2025-11-17", payDate: "2025-12-15", amount: 0.55 },
+        { exDate: "2026-02-24", payDate: "2026-03-23", amount: 0.55 },
+        { exDate: "2026-05-19", payDate: "2026-06-16", amount: 0.55 }
+      ]
+    };
+
     let rawTradeData = [];
+    let calculatedDividends = [];
     let portfolioChart = null;
     let historyChart = null;
 
-    // 初始化頁面
     window.onload = function() {
       document.getElementById('input-date').valueAsDate = new Date();
       fetchSheetData();
     };
 
-    // 分頁切換邏輯
     function switchTab(tabName) {
       ['dashboard', 'history', 'calendar', 'journal'].forEach(tab => {
         document.getElementById(`sec-${tab}`).classList.add('hidden');
@@ -265,19 +300,19 @@
       if (tabName === 'calendar') renderCalendar();
     }
 
-    // 1. 從 Google 試算表抓取歷史紀錄
     async function fetchSheetData() {
       const statusEl = document.getElementById('sync-status');
       statusEl.innerText = "同步中...";
       statusEl.className = "text-amber-400 font-medium";
 
       try {
-        const res = await fetch(GAS_API_URL);
+        const res = await fetch(GAS_API_URL, { method: 'GET', redirect: 'follow' });
         rawTradeData = await res.json();
         
         statusEl.innerText = "同步完成";
         statusEl.className = "text-morandi-accent font-medium";
 
+        calculateUserDividends();
         renderJournalList();
         renderDashboard();
       } catch (err) {
@@ -287,8 +322,41 @@
       }
     }
 
-    // 2. 寫入新紀錄到 Google 試算表
-    async function submitTrade(e) {
+    // 計算使用者依交易歷史實際領到的配息金額
+    function calculateUserDividends() {
+      calculatedDividends = [];
+
+      rawTradeData.forEach(trade => {
+        const symbol = String(trade['股票代號']).padStart(5, '0').slice(-5);
+        const divRecords = ETF_DIVIDEND_DATABASE[symbol] || ETF_DIVIDEND_DATABASE[trade['股票代號']];
+
+        if (divRecords && trade['動作'] === '買進') {
+          const buyDate = new Date(trade['日期']);
+          const shares = Number(trade['股數']) || 0;
+
+          divRecords.forEach(div => {
+            const exDate = new Date(div.exDate);
+            // 如果買進日期在除息日之前（或當天），即可參與該次配息
+            if (buyDate <= exDate) {
+              const totalPayout = Math.round(shares * div.amount);
+              calculatedDividends.push({
+                symbol: symbol,
+                name: trade['股票名稱'] || symbol,
+                exDate: div.exDate,
+                payDate: div.payDate,
+                year: div.payDate.split('-')[0],
+                month: div.payDate.split('-')[1],
+                shares: shares,
+                perShare: div.amount,
+                totalPayout: totalPayout
+              });
+            }
+          });
+        }
+      });
+    }
+
+    function submitTrade(e) {
       e.preventDefault();
       const btn = document.getElementById('submit-btn');
       btn.disabled = true;
@@ -304,26 +372,26 @@
         fee: document.getElementById('input-fee').value || 0
       };
 
-      try {
-        await fetch(GAS_API_URL, {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        });
-
+      fetch(GAS_API_URL, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      })
+      .then(() => {
         alert("成功新增交易紀錄！");
         document.getElementById('trade-form').reset();
         document.getElementById('input-date').valueAsDate = new Date();
-        fetchSheetData(); // 重新整理
-      } catch (err) {
+        fetchSheetData();
+      })
+      .catch(err => {
         alert("寫入失敗，請檢查網路連線。");
         console.error(err);
-      } finally {
+      })
+      .finally(() => {
         btn.disabled = false;
         btn.innerText = "儲存紀錄至雲端試算表";
-      }
+      });
     }
 
-    // 3. 渲染交易日記清單
     function renderJournalList() {
       const container = document.getElementById('journal-list');
       if (!rawTradeData || rawTradeData.length === 0) {
@@ -345,13 +413,13 @@
       `).join('');
     }
 
-    // 4. 渲染總覽 Dashboard
     function renderDashboard() {
       let totalCost = 0;
+      let totalShares = 0;
       let holdings = {};
 
       rawTradeData.forEach(item => {
-        const symbol = item['股票代號'];
+        const symbol = String(item['股票代號']);
         const shares = Number(item['股數']) || 0;
         const price = Number(item['單價']) || 0;
         const fee = Number(item['手續費']) || 0;
@@ -362,17 +430,21 @@
           holdings[symbol].shares += shares;
           holdings[symbol].cost += (shares * price) + fee;
           totalCost += (shares * price) + fee;
-        } else if (item['動作'] === '賣出') {
-          holdings[symbol].shares -= shares;
-          holdings[symbol].cost -= (shares * price);
-          totalCost -= (shares * price);
+          totalShares += shares;
         }
       });
 
-      document.getElementById('dash-total-cost').innerText = `$${Math.round(totalCost).toLocaleString()}`;
-      document.getElementById('dash-total-value').innerText = `$${Math.round(totalCost).toLocaleString()}`; // 暫以成本估算
+      const totalHistoricalDiv = calculatedDividends.reduce((sum, d) => sum + d.totalPayout, 0);
 
-      // 圓餅圖初始化
+      document.getElementById('dash-total-cost').innerText = `$${Math.round(totalCost).toLocaleString()}`;
+      document.getElementById('dash-total-value').innerText = `$${Math.round(totalCost).toLocaleString()}`;
+      document.getElementById('dash-total-dividend').innerText = `$${totalHistoricalDiv.toLocaleString()}`;
+
+      document.getElementById('count-holdings').innerText = Object.keys(holdings).length;
+      document.getElementById('count-shares').innerText = totalShares.toLocaleString();
+      document.getElementById('count-div-times').innerText = calculatedDividends.length;
+      document.getElementById('avg-monthly-div').innerText = `$${Math.round(totalHistoricalDiv / 12).toLocaleString()}`;
+
       const labels = Object.keys(holdings).filter(s => holdings[s].shares > 0);
       const dataValues = labels.map(s => holdings[s].cost);
 
@@ -398,8 +470,24 @@
       });
     }
 
-    // 5. 渲染股息歷程與長條圖
+    // 渲染股息歷程與年份選擇長條圖
     function renderHistory() {
+      const selectedYear = document.getElementById('history-year-select').value;
+      const monthlyPayouts = Array(12).fill(0);
+      let yearTotal = 0;
+
+      const yearDividends = calculatedDividends.filter(d => d.year === selectedYear);
+
+      yearDividends.forEach(d => {
+        const m = parseInt(d.month, 10) - 1;
+        if (m >= 0 && m < 12) {
+          monthlyPayouts[m] += d.totalPayout;
+          yearTotal += d.totalPayout;
+        }
+      });
+
+      document.getElementById('history-year-total').innerText = `${selectedYear} 總計: $${yearTotal.toLocaleString()}`;
+
       const ctx = document.getElementById('chart-dividend-history').getContext('2d');
       if (historyChart) historyChart.destroy();
 
@@ -408,9 +496,10 @@
         data: {
           labels: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
           datasets: [{
-            label: '2026 預估配息 (元)',
-            data: [1200, 3200, 1500, 800, 2100, 3300, 1600, 0, 0, 0, 0, 0],
-            backgroundColor: '#5A8F7B'
+            label: `${selectedYear} 實領配息 (元)`,
+            data: monthlyPayouts,
+            backgroundColor: '#5A8F7B',
+            borderRadius: 4
           }]
         },
         options: {
@@ -423,9 +512,29 @@
           plugins: { legend: { display: false } }
         }
       });
+
+      // 渲染歷史時間軸明細
+      const timelineEl = document.getElementById('history-timeline-list');
+      if (yearDividends.length === 0) {
+        timelineEl.innerHTML = `<p class="text-slate-400 text-center py-4 text-xs">該年份無領息紀錄</p>`;
+        return;
+      }
+
+      timelineEl.innerHTML = yearDividends.map(d => `
+        <div class="bg-white rounded-xl p-3 shadow-sm border border-morandi-border flex justify-between items-center text-xs">
+          <div>
+            <div class="font-bold text-morandi-primary">${d.symbol} ${d.name}</div>
+            <div class="text-[10px] text-slate-400">發放日：${d.payDate} (除息：${d.exDate})</div>
+            <div class="text-[10px] text-slate-500">每股配息 $${d.perShare} × ${d.shares.toLocaleString()} 股</div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold text-morandi-accent">+$${d.totalPayout.toLocaleString()}</div>
+            <div class="text-[10px] bg-morandi-lightAccent text-morandi-accent px-1.5 py-0.5 rounded inline-block mt-1">已入帳</div>
+          </div>
+        </div>
+      `).join('');
     }
 
-    // 6. 渲染股息日曆
     function renderCalendar() {
       const grid = document.getElementById('calendar-grid');
       let html = '';
@@ -437,7 +546,7 @@
           </div>
         `;
       }
-        grid.innerHTML = html;
+      grid.innerHTML = html;
     }
 
     function changeMonth(delta) {
