@@ -68,7 +68,6 @@
 
     <!-- 1. 投資總覽 (Dashboard) -->
     <section id="sec-dashboard" class="space-y-4">
-      <!-- 總資產卡片 -->
       <div class="bg-morandi-primary text-white rounded-xl p-5 shadow-sm space-y-3">
         <div class="flex justify-between items-center">
           <span class="text-xs text-slate-300">總投資價值 (估計)</span>
@@ -88,7 +87,6 @@
         </div>
       </div>
 
-      <!-- 持股統計 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
         <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">持股統計</h2>
         <div class="grid grid-cols-4 gap-2 text-center pt-1" id="holding-summary-counts">
@@ -111,7 +109,6 @@
         </div>
       </div>
 
-      <!-- 資產佔比圓餅圖 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
         <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">持股佔比分析</h2>
         <div class="w-48 h-48 mx-auto">
@@ -122,7 +119,6 @@
 
     <!-- 2. 股息歷程 (History) -->
     <section id="sec-history" class="space-y-4 hidden">
-      <!-- 年份選擇列 -->
       <div class="flex justify-between items-center bg-white p-3 rounded-xl border border-morandi-border">
         <span class="text-xs font-bold text-morandi-primary">選擇統計年份</span>
         <select id="history-year-select" onchange="renderHistory()" class="text-xs border border-slate-200 rounded px-2 py-1 bg-slate-50 font-medium">
@@ -146,10 +142,7 @@
         </div>
       </div>
 
-      <!-- 月份配息明細時間軸卡片區 -->
-      <div class="space-y-3" id="history-timeline-list">
-        <!-- 動態渲染歷史領息細節 -->
-      </div>
+      <div class="space-y-3" id="history-timeline-list"></div>
     </section>
 
     <!-- 3. 股息日曆 (Calendar) -->
@@ -161,9 +154,7 @@
         <div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 font-medium py-1">
           <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
         </div>
-        <div class="grid grid-cols-7 gap-1 text-center text-xs" id="calendar-grid">
-          <!-- 動態生成日曆格子 -->
-        </div>
+        <div class="grid grid-cols-7 gap-1 text-center text-xs" id="calendar-grid"></div>
       </div>
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
@@ -228,7 +219,6 @@
         </form>
       </div>
 
-      <!-- 歷史交易清單 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
         <h2 class="text-sm font-bold text-morandi-primary">已同步買賣紀錄</h2>
         <div id="journal-list" class="space-y-2 text-xs divide-y divide-slate-100">
@@ -243,17 +233,14 @@
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxrlB_2SXpITgtdH_yuMAvOp4Z_KCpoej3UvnBYWcnl1RWYWF7ddbOpE2xbr3CIoZt3/exec";
 
     let rawTradeData = [];
+    let dividendDatabase = {};
     let calculatedDividends = [];
     let portfolioChart = null;
     let historyChart = null;
 
-    const dividendCache = {};
-
-    // 格式化股票代號 (清理空白，並去除 fronting quotes)
     function cleanSymbol(rawSymbol) {
       if (!rawSymbol) return "";
       let str = String(rawSymbol).trim().replace(/['"']/g, '');
-      // 針對台股數字代號進行補零（例如 878 -> 00878）
       if (/^\d+$/.test(str)) {
         return str.padStart(5, '0');
       }
@@ -278,48 +265,6 @@
       if (tabName === 'calendar') renderCalendar();
     }
 
-    // 從 FinMind API 免費抓取歷史配息
-    async function fetchETFDividendsFromAPI(symbol) {
-      const formattedSymbol = cleanSymbol(symbol);
-      if (!formattedSymbol) return [];
-      
-      if (dividendCache[formattedSymbol]) {
-        return dividendCache[formattedSymbol];
-      }
-
-      const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockDividend&data_id=${formattedSymbol}`;
-
-      try {
-        const res = await fetch(url);
-        const json = await res.json();
-        
-        if (json.msg === "success" && Array.isArray(json.data)) {
-          const parsedData = json.data.map(item => {
-            // 抓取現金股利 (涵蓋盈餘分配與公積發放)
-            const cashEarnings = Number(item.CashEarningsDistribution) || 0;
-            const cashStatutory = Number(item.CashStatutorySurplus) || 0;
-            const totalCash = cashEarnings + cashStatutory;
-
-            const exDate = item.ExDividendDate || item.Date;
-            const payDate = item.CashDividendPaymentDate || exDate;
-
-            return {
-              exDate: exDate,
-              payDate: payDate,
-              amount: totalCash
-            };
-          }).filter(d => d.amount > 0 && d.exDate);
-
-          dividendCache[formattedSymbol] = parsedData;
-          return parsedData;
-        }
-      } catch (err) {
-        console.error(`抓取 ${formattedSymbol} 配息資料失敗：`, err);
-      }
-      return [];
-    }
-
-    // 讀取 Google 試算表資料
     async function fetchSheetData() {
       const statusEl = document.getElementById('sync-status');
       statusEl.innerText = "同步中...";
@@ -327,11 +272,19 @@
 
       try {
         const res = await fetch(GAS_API_URL, { method: 'GET', redirect: 'follow' });
-        rawTradeData = await res.json();
+        const resJson = await res.json();
         
+        // 解析 GAS 回傳的交易與配息資料
+        if (Array.isArray(resJson)) {
+          rawTradeData = resJson;
+          dividendDatabase = {};
+        } else {
+          rawTradeData = resJson.trades || [];
+          dividendDatabase = resJson.dividends || {};
+        }
+
         statusEl.innerText = "計算配息中...";
-        
-        await calculateUserDividends();
+        calculateUserDividends();
 
         statusEl.innerText = "同步完成";
         statusEl.className = "text-morandi-accent font-medium";
@@ -345,48 +298,42 @@
       }
     }
 
-    // 比對交易紀錄與 FinMind 歷史配息
-    async function calculateUserDividends() {
+    function calculateUserDividends() {
       calculatedDividends = [];
 
-      // 篩選買進紀錄
       const buyTrades = rawTradeData.filter(t => t['動作'] === '買進');
-      const uniqueSymbols = [...new Set(buyTrades.map(t => cleanSymbol(t['股票代號'])))];
-
-      // 依序向 API 抓取資料
-      for (const symbol of uniqueSymbols) {
-        await fetchETFDividendsFromAPI(symbol);
-      }
 
       buyTrades.forEach(trade => {
         const symbol = cleanSymbol(trade['股票代號']);
-        const divRecords = dividendCache[symbol] || [];
+        const rawDivList = dividendDatabase[symbol] || [];
         
-        // 確保日期可被正常解析 (將字符串格式化)
         const buyDateStr = String(trade['日期']).split('T')[0];
         const buyDate = new Date(buyDateStr);
         const shares = Number(trade['股數']) || 0;
 
-        divRecords.forEach(div => {
-          const exDate = new Date(div.exDate);
+        rawDivList.forEach(item => {
+          const cashAmount = (Number(item.CashEarningsDistribution) || 0) + (Number(item.CashStatutorySurplus) || 0);
+          const exDateStr = item.ExDividendDate || item.Date;
+          const payDateStr = item.CashDividendPaymentDate || exDateStr;
           
-          // 當買進日期早於或等於除息日，即可領取該次配息
-          if (!isNaN(buyDate) && !isNaN(exDate) && buyDate <= exDate) {
-            const totalPayout = Math.round(shares * div.amount);
-            const payDateStr = div.payDate || div.exDate;
-            const dateParts = payDateStr.split('-');
+          if (cashAmount > 0 && exDateStr) {
+            const exDate = new Date(exDateStr);
+            if (!isNaN(buyDate) && !isNaN(exDate) && buyDate <= exDate) {
+              const totalPayout = Math.round(shares * cashAmount);
+              const dateParts = payDateStr.split('-');
 
-            calculatedDividends.push({
-              symbol: symbol,
-              name: trade['股票名稱'] || symbol,
-              exDate: div.exDate,
-              payDate: payDateStr,
-              year: dateParts[0],
-              month: dateParts[1],
-              shares: shares,
-              perShare: div.amount,
-              totalPayout: totalPayout
-            });
+              calculatedDividends.push({
+                symbol: symbol,
+                name: trade['股票名稱'] || symbol,
+                exDate: exDateStr,
+                payDate: payDateStr,
+                year: dateParts[0],
+                month: dateParts[1],
+                shares: shares,
+                perShare: cashAmount,
+                totalPayout: totalPayout
+              });
+            }
           }
         });
       });
