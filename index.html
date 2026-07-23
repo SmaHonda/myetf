@@ -77,11 +77,11 @@
         
         <div class="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-700/60">
           <div>
-            <div class="text-slate-400">總投入成本</div>
+            <div class="text-slate-400">總投入淨成本</div>
             <div class="text-sm font-semibold text-slate-100" id="dash-total-cost">$0</div>
           </div>
           <div>
-            <div class="text-slate-400">歷史總配息 (自動試算)</div>
+            <div class="text-slate-400">歷史總配息 (精確試算)</div>
             <div class="text-sm font-semibold text-morandi-accent" id="dash-total-dividend">$0</div>
           </div>
         </div>
@@ -91,11 +91,11 @@
         <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">持股統計</h2>
         <div class="grid grid-cols-4 gap-2 text-center pt-1" id="holding-summary-counts">
           <div class="bg-slate-50 p-2 rounded">
-            <div class="text-[10px] text-slate-500">持股筆數</div>
+            <div class="text-[10px] text-slate-500">持有檔數</div>
             <div class="text-sm font-bold text-morandi-primary" id="count-holdings">0</div>
           </div>
           <div class="bg-slate-50 p-2 rounded">
-            <div class="text-[10px] text-slate-500">總股數</div>
+            <div class="text-[10px] text-slate-500">現存總股數</div>
             <div class="text-sm font-bold text-morandi-primary" id="count-shares">0</div>
           </div>
           <div class="bg-slate-50 p-2 rounded">
@@ -149,7 +149,21 @@
     <section id="sec-calendar" class="space-y-4 hidden">
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
         <div class="flex justify-between items-center">
-          <h2 class="text-sm font-bold text-morandi-primary" id="calendar-month-title">配息日曆檢視</h2>
+          <h2 class="text-sm font-bold text-morandi-primary">配息發放日曆</h2>
+          <div class="flex space-x-2">
+            <select id="calendar-year-select" onchange="renderCalendar()" class="text-xs border border-slate-200 rounded px-1.5 py-1 bg-slate-50">
+              <option value="2026">2026 年</option>
+              <option value="2025">2025 年</option>
+              <option value="2024">2024 年</option>
+              <option value="2023">2023 年</option>
+            </select>
+            <select id="calendar-month-select" onchange="renderCalendar()" class="text-xs border border-slate-200 rounded px-1.5 py-1 bg-slate-50">
+              <option value="1">1 月</option><option value="2">2 月</option><option value="3">3 月</option>
+              <option value="4">4 月</option><option value="5">5 月</option><option value="6">6 月</option>
+              <option value="7">7 月</option><option value="8">8 月</option><option value="9">9 月</option>
+              <option value="10">10 月</option><option value="11">11 月</option><option value="12">12 月</option>
+            </select>
+          </div>
         </div>
         <div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 font-medium py-1">
           <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
@@ -158,9 +172,9 @@
       </div>
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
-        <h3 class="text-xs font-bold text-morandi-muted uppercase tracking-wider">配息發放紀錄/預告</h3>
+        <h3 class="text-xs font-bold text-morandi-muted uppercase tracking-wider">本月發放明細</h3>
         <div id="calendar-events-list" class="space-y-2 text-xs divide-y divide-slate-100">
-          <p class="text-slate-400 py-2">切換至「股息歷程」可查看詳細年度列表。</p>
+          <p class="text-slate-400 py-2">載入中...</p>
         </div>
       </div>
     </section>
@@ -249,6 +263,18 @@
 
     window.onload = function() {
       document.getElementById('input-date').valueAsDate = new Date();
+      
+      // 設定預設月曆的目前年月
+      const now = new Date();
+      const currentYear = now.getFullYear().toString();
+      const currentMonth = (now.getMonth() + 1).toString();
+      
+      const yearSel = document.getElementById('calendar-year-select');
+      if (yearSel.querySelector(`option[value="${currentYear}"]`)) {
+        yearSel.value = currentYear;
+      }
+      document.getElementById('calendar-month-select').value = currentMonth;
+      
       fetchSheetData();
     };
 
@@ -274,7 +300,6 @@
         const res = await fetch(GAS_API_URL, { method: 'GET', redirect: 'follow' });
         const resJson = await res.json();
         
-        // 解析 GAS 回傳的交易與配息資料
         if (Array.isArray(resJson)) {
           rawTradeData = resJson;
           dividendDatabase = {};
@@ -298,38 +323,57 @@
       }
     }
 
+    // 計算配息：精確依據除息當日庫存股數
     function calculateUserDividends() {
       calculatedDividends = [];
 
-      const buyTrades = rawTradeData.filter(t => t['動作'] === '買進');
+      // 依日期時間由舊到新排序
+      const sortedTrades = rawTradeData.slice().sort((a, b) => new Date(a['日期']) - new Date(b['日期']));
 
-      buyTrades.forEach(trade => {
-        const symbol = cleanSymbol(trade['股票代號']);
+      // 取得所有有配息資料的代號
+      Object.keys(dividendDatabase).forEach(symbol => {
         const rawDivList = dividendDatabase[symbol] || [];
         
-        const buyDateStr = String(trade['日期']).split('T')[0];
-        const buyDate = new Date(buyDateStr);
-        const shares = Number(trade['股數']) || 0;
-
         rawDivList.forEach(item => {
           const cashAmount = (Number(item.CashEarningsDistribution) || 0) + (Number(item.CashStatutorySurplus) || 0);
           const exDateStr = item.ExDividendDate || item.Date;
           const payDateStr = item.CashDividendPaymentDate || exDateStr;
-          
+
           if (cashAmount > 0 && exDateStr) {
             const exDate = new Date(exDateStr);
-            if (!isNaN(buyDate) && !isNaN(exDate) && buyDate <= exDate) {
-              const totalPayout = Math.round(shares * cashAmount);
+
+            // 統計截至除息日前一日/當日買進且未賣出的總庫存
+            let sharesAtExDate = 0;
+            let stockName = symbol;
+
+            sortedTrades.forEach(trade => {
+              const tradeSymbol = cleanSymbol(trade['股票代號']);
+              if (tradeSymbol === symbol) {
+                const tradeDate = new Date(String(trade['日期']).split('T')[0]);
+                if (tradeDate <= exDate) {
+                  const shares = Number(trade['股數']) || 0;
+                  if (trade['動作'] === '買進') {
+                    sharesAtExDate += shares;
+                  } else if (trade['動作'] === '賣出') {
+                    sharesAtExDate -= shares;
+                  }
+                  if (trade['股票名稱']) stockName = trade['股票名稱'];
+                }
+              }
+            });
+
+            if (sharesAtExDate > 0) {
+              const totalPayout = Math.round(sharesAtExDate * cashAmount);
               const dateParts = payDateStr.split('-');
 
               calculatedDividends.push({
                 symbol: symbol,
-                name: trade['股票名稱'] || symbol,
+                name: stockName,
                 exDate: exDateStr,
                 payDate: payDateStr,
                 year: dateParts[0],
-                month: dateParts[1],
-                shares: shares,
+                month: String(parseInt(dateParts[1], 10)), // 去掉前導零供選單比對
+                shares: sharesAtExDate,
                 perShare: cashAmount,
                 totalPayout: totalPayout
               });
@@ -398,7 +442,6 @@
 
     function renderDashboard() {
       let totalCost = 0;
-      let totalShares = 0;
       let holdings = {};
 
       rawTradeData.forEach(item => {
@@ -413,23 +456,28 @@
           holdings[symbol].shares += shares;
           holdings[symbol].cost += (shares * price) + fee;
           totalCost += (shares * price) + fee;
-          totalShares += shares;
+        } else if (item['動作'] === '賣出') {
+          holdings[symbol].shares -= shares;
+          holdings[symbol].cost -= (shares * price) - fee;
+          totalCost -= (shares * price) - fee;
         }
       });
 
+      const activeSymbols = Object.keys(holdings).filter(s => holdings[s].shares > 0);
+      const totalCurrentShares = activeSymbols.reduce((sum, s) => sum + holdings[s].shares, 0);
       const totalHistoricalDiv = calculatedDividends.reduce((sum, d) => sum + d.totalPayout, 0);
 
       document.getElementById('dash-total-cost').innerText = `$${Math.round(totalCost).toLocaleString()}`;
       document.getElementById('dash-total-value').innerText = `$${Math.round(totalCost).toLocaleString()}`;
       document.getElementById('dash-total-dividend').innerText = `$${totalHistoricalDiv.toLocaleString()}`;
 
-      document.getElementById('count-holdings').innerText = Object.keys(holdings).length;
-      document.getElementById('count-shares').innerText = totalShares.toLocaleString();
+      document.getElementById('count-holdings').innerText = activeSymbols.length;
+      document.getElementById('count-shares').innerText = totalCurrentShares.toLocaleString();
       document.getElementById('count-div-times').innerText = calculatedDividends.length;
       document.getElementById('avg-monthly-div').innerText = `$${totalHistoricalDiv.toLocaleString()}`;
 
-      const labels = Object.keys(holdings).filter(s => holdings[s].shares > 0);
-      const dataValues = labels.map(s => holdings[s].cost);
+      const labels = activeSymbols.map(s => `${s} ${holdings[s].name || ''}`);
+      const dataValues = activeSymbols.map(s => holdings[s].cost);
 
       const ctx = document.getElementById('chart-portfolio').getContext('2d');
       if (portfolioChart) portfolioChart.destroy();
@@ -440,7 +488,7 @@
           labels: labels,
           datasets: [{
             data: dataValues,
-            backgroundColor: ['#2B3A4A', '#5A8F7B', '#6B7C85', '#94A3B8', '#CBD5E1']
+            backgroundColor: ['#2B3A4A', '#5A8F7B', '#6B7C85', '#94A3B8', '#CBD5E1', '#829AB1']
           }]
         },
         options: {
@@ -510,23 +558,65 @@
           </div>
           <div class="text-right">
             <div class="text-sm font-bold text-morandi-accent">+$${d.totalPayout.toLocaleString()}</div>
-            <div class="text-[10px] bg-morandi-lightAccent text-morandi-accent px-1.5 py-0.5 rounded inline-block mt-1">自動試算</div>
+            <div class="text-[10px] bg-morandi-lightAccent text-morandi-accent px-1.5 py-0.5 rounded inline-block mt-1">精確試算</div>
           </div>
         </div>
       `).join('');
     }
 
+    // 渲染動態股息日曆與明細
     function renderCalendar() {
+      const year = document.getElementById('calendar-year-select').value;
+      const month = document.getElementById('calendar-month-select').value;
+
+      const firstDay = new Date(parseInt(year), parseInt(month) - 1, 1).getDay();
+      const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
+
+      // 篩選當月配息資料
+      const monthEvents = calculatedDividends.filter(d => d.year === year && String(d.month) === String(month));
+
       const grid = document.getElementById('calendar-grid');
       let html = '';
-      for (let i = 1; i <= 31; i++) {
+
+      // 填補月初空格
+      for (let i = 0; i < firstDay; i++) {
+        html += `<div class="h-10 border border-transparent rounded"></div>`;
+      }
+
+      // 填寫日期
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dayPayouts = monthEvents.filter(e => e.payDate === dateStr);
+        const hasPayout = dayPayouts.length > 0;
+
         html += `
-          <div class="h-9 border border-slate-100 rounded p-1 bg-slate-50">
-            ${i}
+          <div class="h-10 border border-slate-100 rounded p-1 bg-white flex flex-col justify-between items-center ${hasPayout ? 'bg-emerald-50/60 border-emerald-200' : ''}">
+            <span class="${hasPayout ? 'font-bold text-morandi-accent' : 'text-slate-600'}">${day}</span>
+            ${hasPayout ? `<span class="text-[9px] bg-morandi-accent text-white px-1 rounded transform scale-90">有配息</span>` : ''}
           </div>
         `;
       }
       grid.innerHTML = html;
+
+      // 渲染當月發放清單
+      const eventsEl = document.getElementById('calendar-events-list');
+      if (monthEvents.length === 0) {
+        eventsEl.innerHTML = `<p class="text-slate-400 py-3 text-center">本月份無股息發放紀錄</p>`;
+        return;
+      }
+
+      eventsEl.innerHTML = monthEvents.map(d => `
+        <div class="pt-2 flex justify-between items-center">
+          <div>
+            <div class="font-bold text-morandi-primary">${d.symbol} ${d.name}</div>
+            <div class="text-[10px] text-slate-400">發放日期：${d.payDate}</div>
+          </div>
+          <div class="text-right">
+            <div class="font-bold text-morandi-accent">+$${d.totalPayout.toLocaleString()}</div>
+            <div class="text-[10px] text-slate-400">${d.shares.toLocaleString()} 股</div>
+          </div>
+        </div>
+      `).join('');
     }
   </script>
 </body>
