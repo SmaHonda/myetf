@@ -314,7 +314,8 @@
 
         rawDivList.forEach(item => {
           const cashAmount = (Number(item.CashEarningsDistribution) || 0) + (Number(item.CashStatutorySurplus) || 0);
-          const exDateStr = item.ExDividendDate || item.Date;
+          // FinMind 實際回傳的除息日欄位是 CashExDividendTradingDate，日期欄位是小寫 date
+          const exDateStr = item.CashExDividendTradingDate || item.date;
           const payDateStr = item.CashDividendPaymentDate || exDateStr;
 
           if (cashAmount > 0 && exDateStr) {
