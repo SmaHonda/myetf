@@ -142,6 +142,7 @@
         </div>
       </div>
 
+      <p class="text-[10px] text-slate-400 px-1">點選下方月份（或長條圖）可查看該月各檔個股的配息明細</p>
       <div class="space-y-3" id="history-timeline-list"></div>
     </section>
 
@@ -237,6 +238,8 @@
     let calculatedDividends = [];
     let portfolioChart = null;
     let historyChart = null;
+    let currentYearDividends = [];   // 目前選取年份的所有配息明細（未分月彙整）
+    let historyDrilldownMonth = null; // 目前鑽取的月份，例如 "03"；null 代表第一層（月份總覽）
 
     // 修正重點：不再強制補零到 5 碼。
     // 台股代號長度本來就不固定（2330 / 0050 / 0056 是 4 碼，00878 / 00713 是 5 碼），
@@ -304,13 +307,23 @@
 
       const buyTrades = rawTradeData.filter(t => t['動作'] === '買進');
 
+      // 先依股票代號整理出所有買進紀錄（日期、股數），之後同一次除息事件才能加總「總股數」
+      const symbolTrades = {};
       buyTrades.forEach(trade => {
         const symbol = cleanSymbol(trade['股票代號']);
-        const rawDivList = dividendDatabase[symbol] || [];
-
         const buyDateStr = String(trade['日期']).split('T')[0];
         const buyDate = new Date(buyDateStr);
         const shares = Number(trade['股數']) || 0;
+
+        if (!symbolTrades[symbol]) {
+          symbolTrades[symbol] = { name: trade['股票名稱'] || symbol, trades: [] };
+        }
+        symbolTrades[symbol].trades.push({ buyDate, shares });
+      });
+
+      Object.keys(symbolTrades).forEach(symbol => {
+        const info = symbolTrades[symbol];
+        const rawDivList = dividendDatabase[symbol] || [];
 
         rawDivList.forEach(item => {
           const cashAmount = (Number(item.CashEarningsDistribution) || 0) + (Number(item.CashStatutorySurplus) || 0);
@@ -318,24 +331,34 @@
           const exDateStr = item.CashExDividendTradingDate || item.date;
           const payDateStr = item.CashDividendPaymentDate || exDateStr;
 
-          if (cashAmount > 0 && exDateStr) {
-            const exDate = new Date(exDateStr);
-            if (!isNaN(buyDate) && !isNaN(exDate) && buyDate <= exDate) {
-              const totalPayout = Math.round(shares * cashAmount);
-              const dateParts = payDateStr.split('-');
+          if (cashAmount <= 0 || !exDateStr) return;
 
-              calculatedDividends.push({
-                symbol: symbol,
-                name: trade['股票名稱'] || symbol,
-                exDate: exDateStr,
-                payDate: payDateStr,
-                year: dateParts[0],
-                month: dateParts[1],
-                shares: shares,
-                perShare: cashAmount,
-                totalPayout: totalPayout
-              });
+          const exDate = new Date(exDateStr);
+          if (isNaN(exDate)) return;
+
+          // 加總「除息日之前」所有買進股數，同一次除息事件只產生一筆紀錄
+          let totalShares = 0;
+          info.trades.forEach(t => {
+            if (!isNaN(t.buyDate) && t.buyDate <= exDate) {
+              totalShares += t.shares;
             }
+          });
+
+          if (totalShares > 0) {
+            const totalPayout = Math.round(totalShares * cashAmount);
+            const dateParts = payDateStr.split('-');
+
+            calculatedDividends.push({
+              symbol: symbol,
+              name: info.name,
+              exDate: exDateStr,
+              payDate: payDateStr,
+              year: dateParts[0],
+              month: dateParts[1],
+              shares: totalShares,
+              perShare: cashAmount,
+              totalPayout: totalPayout
+            });
           }
         });
       });
@@ -455,20 +478,25 @@
       });
     }
 
+    // 依目前 currentYearDividends 重新計算各月加總，回傳長度為 12 的陣列
+    function computeMonthlyPayouts() {
+      const monthlyPayouts = Array(12).fill(0);
+      currentYearDividends.forEach(d => {
+        const m = parseInt(d.month, 10) - 1;
+        if (m >= 0 && m < 12) monthlyPayouts[m] += d.totalPayout;
+      });
+      return monthlyPayouts;
+    }
+
     function renderHistory() {
       const selectedYear = document.getElementById('history-year-select').value;
-      const monthlyPayouts = Array(12).fill(0);
-      let yearTotal = 0;
 
-      const yearDividends = calculatedDividends.filter(d => d.year === selectedYear);
+      // 切換年份時，回到第一層（月份總覽）
+      historyDrilldownMonth = null;
+      currentYearDividends = calculatedDividends.filter(d => d.year === selectedYear);
 
-      yearDividends.forEach(d => {
-        const m = parseInt(d.month, 10) - 1;
-        if (m >= 0 && m < 12) {
-          monthlyPayouts[m] += d.totalPayout;
-          yearTotal += d.totalPayout;
-        }
-      });
+      const monthlyPayouts = computeMonthlyPayouts();
+      const yearTotal = monthlyPayouts.reduce((sum, v) => sum + v, 0);
 
       document.getElementById('history-year-total').innerText = `${selectedYear} 總計: $${yearTotal.toLocaleString()}`;
 
@@ -493,29 +521,109 @@
             y: { beginAtZero: true, grid: { color: '#F1F5F9' } },
             x: { grid: { display: false } }
           },
-          plugins: { legend: { display: false } }
+          plugins: { legend: { display: false } },
+          onClick: (evt, elements) => {
+            if (elements.length > 0) {
+              const idx = elements[0].index;
+              if (monthlyPayouts[idx] > 0) {
+                showMonthDetail(selectedYear, String(idx + 1).padStart(2, '0'));
+              }
+            }
+          }
         }
       });
 
+      renderHistoryList(selectedYear);
+    }
+
+    // 依 historyDrilldownMonth 狀態，決定畫「第一層：月份總覽」還是「第二層：單月配息明細」
+    function renderHistoryList(selectedYear) {
       const timelineEl = document.getElementById('history-timeline-list');
-      if (yearDividends.length === 0) {
-        timelineEl.innerHTML = `<p class="text-slate-400 text-center py-4 text-xs">該年份無領息紀錄</p>`;
-        return;
+
+      if (historyDrilldownMonth) {
+        renderMonthDetail(timelineEl, selectedYear);
+      } else {
+        renderMonthSummary(timelineEl, selectedYear);
+      }
+    }
+
+    // 第一層：依月份整合，只顯示該月領取的總金額
+    function renderMonthSummary(timelineEl, selectedYear) {
+      const monthlyPayouts = computeMonthlyPayouts();
+      const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+
+      let html = '';
+      for (let i = 0; i < 12; i++) {
+        if (monthlyPayouts[i] <= 0) continue;
+        const monthStr = String(i + 1).padStart(2, '0');
+        const countInMonth = currentYearDividends.filter(d => d.month === monthStr).length;
+
+        html += `
+          <button onclick="showMonthDetail('${selectedYear}', '${monthStr}')" class="w-full text-left bg-white rounded-xl p-3 shadow-sm border border-morandi-border flex justify-between items-center text-xs hover:border-morandi-accent transition">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-morandi-lightAccent flex items-center justify-center text-morandi-accent font-bold text-xs shrink-0">${monthNames[i]}</div>
+              <div>
+                <div class="font-bold text-morandi-primary">${selectedYear} 年 ${monthNames[i]}</div>
+                <div class="text-[10px] text-slate-400">共 ${countInMonth} 筆配息</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="text-sm font-bold text-morandi-accent">+$${monthlyPayouts[i].toLocaleString()}</div>
+              <span class="text-slate-300 text-base">›</span>
+            </div>
+          </button>
+        `;
       }
 
-      timelineEl.innerHTML = yearDividends.map(d => `
-        <div class="bg-white rounded-xl p-3 shadow-sm border border-morandi-border flex justify-between items-center text-xs">
-          <div>
-            <div class="font-bold text-morandi-primary">${d.symbol} ${d.name}</div>
-            <div class="text-[10px] text-slate-400">發放日：${d.payDate} (除息：${d.exDate})</div>
-            <div class="text-[10px] text-slate-500">每股配息 $${d.perShare} × ${d.shares.toLocaleString()} 股</div>
-          </div>
-          <div class="text-right">
-            <div class="text-sm font-bold text-morandi-accent">+$${d.totalPayout.toLocaleString()}</div>
-            <div class="text-[10px] bg-morandi-lightAccent text-morandi-accent px-1.5 py-0.5 rounded inline-block mt-1">自動試算</div>
-          </div>
+      timelineEl.innerHTML = html || `<p class="text-slate-400 text-center py-4 text-xs">該年份無領息紀錄</p>`;
+    }
+
+    // 第二層：單一月份中，各檔股票分別列出（配息 × 總股數），並保留發放日／除息日
+    function renderMonthDetail(timelineEl, selectedYear) {
+      const monthStr = historyDrilldownMonth;
+      const monthLabel = `${selectedYear} 年 ${parseInt(monthStr, 10)} 月`;
+      const monthDividends = currentYearDividends
+        .filter(d => d.month === monthStr)
+        .sort((a, b) => (a.exDate > b.exDate ? 1 : a.exDate < b.exDate ? -1 : 0));
+
+      let html = `
+        <div class="flex items-center justify-between px-1">
+          <button onclick="backToMonthSummary('${selectedYear}')" class="flex items-center gap-1 text-xs text-morandi-secondary hover:text-morandi-primary font-medium">
+            <span>←</span><span>返回月份總覽</span>
+          </button>
+          <span class="text-xs font-bold text-morandi-primary">${monthLabel} 配息明細</span>
         </div>
-      `).join('');
+      `;
+
+      if (monthDividends.length === 0) {
+        html += `<p class="text-slate-400 text-center py-4 text-xs">該月份無領息紀錄</p>`;
+      } else {
+        html += monthDividends.map(d => `
+          <div class="bg-white rounded-xl p-3 shadow-sm border border-morandi-border flex justify-between items-center text-xs">
+            <div>
+              <div class="font-bold text-morandi-primary">${d.symbol} ${d.name}</div>
+              <div class="text-[10px] text-slate-400">發放日：${d.payDate}（除息：${d.exDate}）</div>
+              <div class="text-[10px] text-slate-500">每股配息 $${d.perShare} × ${d.shares.toLocaleString()} 股</div>
+            </div>
+            <div class="text-right">
+              <div class="text-sm font-bold text-morandi-accent">+$${d.totalPayout.toLocaleString()}</div>
+              <div class="text-[10px] bg-morandi-lightAccent text-morandi-accent px-1.5 py-0.5 rounded inline-block mt-1">自動試算</div>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      timelineEl.innerHTML = html;
+    }
+
+    function showMonthDetail(selectedYear, monthStr) {
+      historyDrilldownMonth = monthStr;
+      renderHistoryList(selectedYear);
+    }
+
+    function backToMonthSummary(selectedYear) {
+      historyDrilldownMonth = null;
+      renderHistoryList(selectedYear);
     }
 
     function renderCalendar() {
