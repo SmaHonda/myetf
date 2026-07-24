@@ -150,27 +150,18 @@
     <section id="sec-calendar" class="space-y-4 hidden">
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
         <div class="flex justify-between items-center">
-          <button onclick="changeCalendarMonth(-1)" class="w-7 h-7 flex items-center justify-center rounded-full bg-slate-100 text-morandi-secondary hover:bg-slate-200 transition">‹</button>
-          <div class="flex items-center gap-2">
-            <h2 class="text-sm font-bold text-morandi-primary" id="calendar-month-title">配息日曆檢視</h2>
-            <button onclick="jumpToToday()" class="text-[10px] text-morandi-accent border border-morandi-accent/40 rounded px-1.5 py-0.5 hover:bg-morandi-lightAccent transition">今天</button>
-          </div>
-          <button onclick="changeCalendarMonth(1)" class="w-7 h-7 flex items-center justify-center rounded-full bg-slate-100 text-morandi-secondary hover:bg-slate-200 transition">›</button>
+          <h2 class="text-sm font-bold text-morandi-primary" id="calendar-month-title">配息日曆檢視</h2>
         </div>
         <div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 font-medium py-1">
           <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
         </div>
         <div class="grid grid-cols-7 gap-1 text-center text-xs" id="calendar-grid"></div>
-        <div class="flex justify-center gap-4 text-[10px] text-slate-400 pt-1">
-          <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-rose-400 inline-block"></span>除息日</span>
-          <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-morandi-accent inline-block"></span>發放日</span>
-        </div>
       </div>
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
-        <h3 class="text-xs font-bold text-morandi-muted uppercase tracking-wider">當日配息紀錄</h3>
-        <div id="calendar-events-list" class="space-y-1 text-xs divide-y divide-slate-100">
-          <p class="text-slate-400 py-2">載入中...</p>
+        <h3 class="text-xs font-bold text-morandi-muted uppercase tracking-wider">配息發放紀錄/預告</h3>
+        <div id="calendar-events-list" class="space-y-2 text-xs divide-y divide-slate-100">
+          <p class="text-slate-400 py-2">切換至「股息歷程」可查看詳細年度列表。</p>
         </div>
       </div>
     </section>
@@ -249,10 +240,6 @@
     let historyChart = null;
     let currentYearDividends = [];   // 目前選取年份的所有配息明細（未分月彙整）
     let historyDrilldownMonth = null; // 目前鑽取的月份，例如 "03"；null 代表第一層（月份總覽）
-    let currentTab = 'dashboard';
-    let calendarViewYear = null;    // 日曆目前檢視的年份
-    let calendarViewMonth = null;   // 日曆目前檢視的月份 (1-12)
-    let calendarSelectedDate = null; // 日曆目前選取的日期字串 "yyyy-MM-dd"
 
     // 修正重點：不再強制補零到 5 碼。
     // 台股代號長度本來就不固定（2330 / 0050 / 0056 是 4 碼，00878 / 00713 是 5 碼），
