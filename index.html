@@ -148,20 +148,33 @@
 
     <!-- 3. 股息日曆 (Calendar) -->
     <section id="sec-calendar" class="space-y-4 hidden">
-      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
-        <div class="flex justify-between items-center">
-          <h2 class="text-sm font-bold text-morandi-primary" id="calendar-month-title">配息日曆檢視</h2>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
+        
+        <!-- 日曆控制列與圖例 -->
+        <div class="flex justify-between items-center mb-1">
+          <button onclick="changeCalendarMonth(-1)" class="p-1 px-3 text-slate-500 hover:bg-slate-100 rounded transition font-bold">&lt;</button>
+          <div class="text-center">
+            <h2 class="text-sm font-bold text-morandi-primary" id="calendar-month-title">-- 年 -- 月</h2>
+            <div class="flex items-center justify-center gap-2 text-[10px] text-slate-500 mt-1">
+              <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>除息</span>
+              <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-morandi-accent"></span>發放</span>
+            </div>
+          </div>
+          <button onclick="changeCalendarMonth(1)" class="p-1 px-3 text-slate-500 hover:bg-slate-100 rounded transition font-bold">&gt;</button>
         </div>
-        <div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 font-medium py-1">
-          <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+
+        <div class="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 font-bold py-1 border-b border-slate-100 pb-2">
+          <div class="text-rose-500">日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-morandi-accent">六</div>
         </div>
-        <div class="grid grid-cols-7 gap-1 text-center text-xs" id="calendar-grid"></div>
+        
+        <!-- 網格生成處 -->
+        <div class="grid grid-cols-7 gap-1 text-center text-xs mt-2" id="calendar-grid"></div>
       </div>
 
-      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
-        <h3 class="text-xs font-bold text-morandi-muted uppercase tracking-wider">配息發放紀錄/預告</h3>
-        <div id="calendar-events-list" class="space-y-2 text-xs divide-y divide-slate-100">
-          <p class="text-slate-400 py-2">切換至「股息歷程」可查看詳細年度列表。</p>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2 min-h-[150px]">
+        <div id="calendar-events-list" class="space-y-2 text-xs">
+          <!-- 當日行程將會渲染在這裡 -->
+          <p class="text-slate-400 py-2">載入中...</p>
         </div>
       </div>
     </section>
@@ -236,17 +249,28 @@
     let rawTradeData = [];
     let dividendDatabase = {};
     let calculatedDividends = [];
+    
+    // 圖表與狀態
     let portfolioChart = null;
     let historyChart = null;
-    let currentYearDividends = [];   // 目前選取年份的所有配息明細（未分月彙整）
-    let historyDrilldownMonth = null; // 目前鑽取的月份，例如 "03"；null 代表第一層（月份總覽）
+    let currentYearDividends = [];   
+    let historyDrilldownMonth = null; 
 
-    // 修正重點：不再強制補零到 5 碼。
-    // 台股代號長度本來就不固定（2330 / 0050 / 0056 是 4 碼，00878 / 00713 是 5 碼），
-    // 只要單純清理空白與引號，保留原始代號即可，才能跟 FinMind 的 data_id 對得上。
+    // 日曆專用狀態
+    let currentCalDate = new Date(); // 畫面上顯示的月份基準點
+    let selectedCalDate = new Date(); // 使用者點選的特定日期
+
     function cleanSymbol(rawSymbol) {
       if (!rawSymbol) return "";
       return String(rawSymbol).trim().replace(/['"']/g, '');
+    }
+
+    // 取得 YYYY-MM-DD 格式 (以本地時間為主，避免 UTC 時差問題)
+    function getLocalYMD(dateObj) {
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const d = String(dateObj.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
     }
 
     window.onload = function() {
@@ -273,12 +297,10 @@
       statusEl.className = "text-amber-400 font-medium";
 
       try {
-        // 加上時間戳記參數，避免 GET 請求被快取，確保每次都拿到最新資料
         const noCacheUrl = GAS_API_URL + "?t=" + new Date().getTime();
         const res = await fetch(noCacheUrl, { method: 'GET', redirect: 'follow' });
         const resJson = await res.json();
 
-        // 解析 GAS 回傳的交易與配息資料
         if (Array.isArray(resJson)) {
           rawTradeData = resJson;
           dividendDatabase = {};
@@ -295,6 +317,11 @@
 
         renderJournalList();
         renderDashboard();
+        
+        // 確保在背景載入完畢後，日曆與歷程也有最新資料
+        if (!document.getElementById('sec-history').classList.contains('hidden')) renderHistory();
+        if (!document.getElementById('sec-calendar').classList.contains('hidden')) renderCalendar();
+
       } catch (err) {
         console.error("同步失敗：", err);
         statusEl.innerText = "同步失敗";
@@ -304,10 +331,8 @@
 
     function calculateUserDividends() {
       calculatedDividends = [];
-
       const buyTrades = rawTradeData.filter(t => t['動作'] === '買進');
 
-      // 先依股票代號整理出所有買進紀錄（日期、股數），之後同一次除息事件才能加總「總股數」
       const symbolTrades = {};
       buyTrades.forEach(trade => {
         const symbol = cleanSymbol(trade['股票代號']);
@@ -327,7 +352,6 @@
 
         rawDivList.forEach(item => {
           const cashAmount = (Number(item.CashEarningsDistribution) || 0) + (Number(item.CashStatutorySurplus) || 0);
-          // FinMind 實際回傳的除息日欄位是 CashExDividendTradingDate，日期欄位是小寫 date
           const exDateStr = item.CashExDividendTradingDate || item.date;
           const payDateStr = item.CashDividendPaymentDate || exDateStr;
 
@@ -336,7 +360,6 @@
           const exDate = new Date(exDateStr);
           if (isNaN(exDate)) return;
 
-          // 加總「除息日之前」所有買進股數，同一次除息事件只產生一筆紀錄
           let totalShares = 0;
           info.trades.forEach(t => {
             if (!isNaN(t.buyDate) && t.buyDate <= exDate) {
@@ -478,7 +501,6 @@
       });
     }
 
-    // 依目前 currentYearDividends 重新計算各月加總，回傳長度為 12 的陣列
     function computeMonthlyPayouts() {
       const monthlyPayouts = Array(12).fill(0);
       currentYearDividends.forEach(d => {
@@ -490,8 +512,6 @@
 
     function renderHistory() {
       const selectedYear = document.getElementById('history-year-select').value;
-
-      // 切換年份時，回到第一層（月份總覽）
       historyDrilldownMonth = null;
       currentYearDividends = calculatedDividends.filter(d => d.year === selectedYear);
 
@@ -536,10 +556,8 @@
       renderHistoryList(selectedYear);
     }
 
-    // 依 historyDrilldownMonth 狀態，決定畫「第一層：月份總覽」還是「第二層：單月配息明細」
     function renderHistoryList(selectedYear) {
       const timelineEl = document.getElementById('history-timeline-list');
-
       if (historyDrilldownMonth) {
         renderMonthDetail(timelineEl, selectedYear);
       } else {
@@ -547,7 +565,6 @@
       }
     }
 
-    // 第一層：依月份整合，只顯示該月領取的總金額
     function renderMonthSummary(timelineEl, selectedYear) {
       const monthlyPayouts = computeMonthlyPayouts();
       const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
@@ -578,7 +595,6 @@
       timelineEl.innerHTML = html || `<p class="text-slate-400 text-center py-4 text-xs">該年份無領息紀錄</p>`;
     }
 
-    // 第二層：單一月份中，各檔股票分別列出（配息 × 總股數），並保留發放日／除息日
     function renderMonthDetail(timelineEl, selectedYear) {
       const monthStr = historyDrilldownMonth;
       const monthLabel = `${selectedYear} 年 ${parseInt(monthStr, 10)} 月`;
@@ -626,17 +642,143 @@
       renderHistoryList(selectedYear);
     }
 
+    // ================== 日曆功能 (Calendar) ==================
+
+    function changeCalendarMonth(offset) {
+      currentCalDate.setMonth(currentCalDate.getMonth() + offset);
+      renderCalendar();
+    }
+
+    function selectDate(dateStr) {
+      // 避免時區問題，手動將 YYYY-MM-DD 轉成 Date (或是後面直接用字串比對即可，不一定要轉Date，但為了保留狀態統一轉)
+      const parts = dateStr.split('-');
+      selectedCalDate = new Date(parts[0], parts[1] - 1, parts[2]);
+      renderCalendar();
+    }
+
     function renderCalendar() {
-      const grid = document.getElementById('calendar-grid');
+      const year = currentCalDate.getFullYear();
+      const month = currentCalDate.getMonth(); // 0-11
+
+      // 標題
+      document.getElementById('calendar-month-title').innerText = `${year} 年 ${month + 1} 月`;
+
+      // 該月第一天是星期幾 (0是週日，6是週六)
+      const firstDay = new Date(year, month, 1).getDay(); 
+      // 該月總共有幾天
+      const daysInMonth = new Date(year, month + 1, 0).getDate(); 
+
+      // 建立該月份的事件地圖 (以日期字串 YYYY-MM-DD 為 Key)
+      const eventsMap = {};
+      calculatedDividends.forEach(d => {
+        if (d.exDate) {
+          if (!eventsMap[d.exDate]) eventsMap[d.exDate] = { ex: [], pay: [] };
+          eventsMap[d.exDate].ex.push(d);
+        }
+        if (d.payDate) {
+          if (!eventsMap[d.payDate]) eventsMap[d.payDate] = { ex: [], pay: [] };
+          eventsMap[d.payDate].pay.push(d);
+        }
+      });
+
+      const todayStr = getLocalYMD(new Date());
+      const selectedStr = getLocalYMD(selectedCalDate);
+
       let html = '';
-      for (let i = 1; i <= 31; i++) {
+      
+      // 補齊前面的空白格子
+      for (let i = 0; i < firstDay; i++) {
+        html += `<div class="h-[52px] bg-transparent"></div>`;
+      }
+
+      // 繪製日期格子
+      for (let i = 1; i <= daysInMonth; i++) {
+        const dStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+        const hasEx = eventsMap[dStr] && eventsMap[dStr].ex.length > 0;
+        const hasPay = eventsMap[dStr] && eventsMap[dStr].pay.length > 0;
+
+        let baseClasses = "h-[52px] rounded flex flex-col items-center justify-start py-1 cursor-pointer transition relative border ";
+
+        // 決定格子的視覺狀態
+        if (dStr === selectedStr) {
+          baseClasses += "border-morandi-primary bg-slate-100 font-bold text-morandi-primary ";
+        } else if (dStr === todayStr) {
+          baseClasses += "border-morandi-accent bg-morandi-lightAccent text-morandi-accent font-bold ";
+        } else {
+          baseClasses += "border-slate-100 bg-white hover:bg-slate-50 text-slate-600 ";
+        }
+
+        // 事件點點
+        let dotsHtml = '<div class="flex gap-1 mt-auto mb-0.5">';
+        if (hasEx) dotsHtml += `<span class="w-1.5 h-1.5 rounded-full bg-amber-400" title="除息日"></span>`;
+        if (hasPay) dotsHtml += `<span class="w-1.5 h-1.5 rounded-full bg-morandi-accent" title="發放日"></span>`;
+        dotsHtml += '</div>';
+
         html += `
-          <div class="h-9 border border-slate-100 rounded p-1 bg-slate-50">
-            ${i}
+          <div class="${baseClasses}" onclick="selectDate('${dStr}')">
+            <span>${i}</span>
+            ${dotsHtml}
           </div>
         `;
       }
-      grid.innerHTML = html;
+
+      document.getElementById('calendar-grid').innerHTML = html;
+      renderCalendarEventsList();
+    }
+
+    function renderCalendarEventsList() {
+      const listEl = document.getElementById('calendar-events-list');
+      const selectedStr = getLocalYMD(selectedCalDate);
+
+      // 過濾出選取當日的除息與發放事件
+      const exEvents = calculatedDividends.filter(d => d.exDate === selectedStr);
+      const payEvents = calculatedDividends.filter(d => d.payDate === selectedStr);
+
+      let html = `<div class="text-sm font-bold text-morandi-primary mb-2 border-b pb-2 flex items-center justify-between">
+                    <span>${selectedStr} 行程</span>
+                  </div>`;
+
+      if (exEvents.length === 0 && payEvents.length === 0) {
+        html += `<div class="text-center py-6 text-slate-400">當日無配息或除息紀錄</div>`;
+        listEl.innerHTML = html;
+        return;
+      }
+
+      // 渲染除息事件
+      if (exEvents.length > 0) {
+        html += `<div class="text-[10px] font-bold text-amber-500 mt-3 mb-1.5 tracking-wider">除息日標示</div>`;
+        exEvents.forEach(d => {
+          html += `
+            <div class="bg-amber-50 rounded-lg p-3 mb-2 flex justify-between items-center border border-amber-100/50">
+              <div>
+                <div class="font-bold text-slate-700 text-xs">${d.symbol} ${d.name}</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">預計配息：$${d.perShare} / 預定發放：${d.payDate}</div>
+              </div>
+            </div>
+          `;
+        });
+      }
+
+      // 渲染發放事件
+      if (payEvents.length > 0) {
+        html += `<div class="text-[10px] font-bold text-morandi-accent mt-3 mb-1.5 tracking-wider">股息入帳</div>`;
+        payEvents.forEach(d => {
+          html += `
+            <div class="bg-morandi-lightAccent rounded-lg p-3 mb-2 flex justify-between items-center border border-morandi-accent/20">
+              <div>
+                <div class="font-bold text-slate-700 text-xs">${d.symbol} ${d.name}</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">除息日：${d.exDate}</div>
+              </div>
+              <div class="text-right">
+                <div class="text-[10px] text-slate-500">預計入帳</div>
+                <div class="text-sm font-bold text-morandi-accent">+$${d.totalPayout.toLocaleString()}</div>
+              </div>
+            </div>
+          `;
+        });
+      }
+
+      listEl.innerHTML = html;
     }
   </script>
 </body>
