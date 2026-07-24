@@ -116,9 +116,17 @@
         </div>
       </div>
 
-      <!-- 新增：個別持股清單 -->
+      <!-- 更新：個別持股清單與排序 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
-        <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">個別持股績效 (股息結算)</h2>
+        <div class="flex justify-between items-center">
+          <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">個別持股績效 (股息結算)</h2>
+          <select id="sort-holdings-select" onchange="renderHoldingsList()" class="text-xs border border-slate-200 rounded px-2 py-1 bg-slate-50 font-medium text-morandi-primary focus:outline-none">
+            <option value="annRoiDesc">年化報酬 (高到低)</option>
+            <option value="roiDesc">總報酬率 (高到低)</option>
+            <option value="costDesc">投入成本 (高到低)</option>
+            <option value="divDesc">總配息額 (高到低)</option>
+          </select>
+        </div>
         <div id="dashboard-holdings-list" class="divide-y divide-slate-100">
           <p class="text-slate-400 text-center py-4 text-xs">載入中...</p>
         </div>
@@ -263,6 +271,7 @@
     let historyChart = null;
     let currentYearDividends = [];   
     let historyDrilldownMonth = null; 
+    let currentHoldingsSummary = []; // 儲存各檔股票的統計資訊以供排序
 
     // 日曆專用狀態
     let currentCalDate = new Date(); // 畫面上顯示的月份基準點
@@ -273,7 +282,7 @@
       return String(rawSymbol).trim().replace(/['"']/g, '');
     }
 
-    // 取得 YYYY-MM-DD 格式 (以本地時間為主，避免 UTC 時差問題)
+    // 取得 YYYY-MM-DD 格式
     function getLocalYMD(dateObj) {
       const y = dateObj.getFullYear();
       const m = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -326,7 +335,6 @@
         renderJournalList();
         renderDashboard();
         
-        // 確保在背景載入完畢後，日曆與歷程也有最新資料
         if (!document.getElementById('sec-history').classList.contains('hidden')) renderHistory();
         if (!document.getElementById('sec-calendar').classList.contains('hidden')) renderCalendar();
 
@@ -457,7 +465,7 @@
       let totalShares = 0;
       let holdings = {};
 
-      // 1. 整理買進紀錄，並找出最初買進日
+      // 1. 整理買進紀錄
       rawTradeData.forEach(item => {
         const symbol = cleanSymbol(item['股票代號']);
         const shares = Number(item['股數']) || 0;
@@ -531,62 +539,102 @@
         }
       });
 
-      // 4. 渲染個別持股清單
-      const listEl = document.getElementById('dashboard-holdings-list');
-      let html = '';
+      // 4. 準備清單資料，以供後續排序及渲染
       const today = new Date();
-
-      labels.forEach(symbol => {
+      currentHoldingsSummary = labels.map(symbol => {
           const h = holdings[symbol];
           const roi = h.cost > 0 ? (h.totalDividend / h.cost) : 0;
           const roiPercent = (roi * 100).toFixed(2);
           
           let annualizedRoiPercent = "0.00";
+          let sortAnnRoi = 0; // 用於排序的精確數值
+
           if (h.firstBuyDate && !isNaN(h.firstBuyDate)) {
               const daysHeld = (today - h.firstBuyDate) / (1000 * 60 * 60 * 24);
               if (daysHeld > 0) {
                   const annRoi = Math.pow(1 + roi, 365.25 / daysHeld) - 1;
-                  // 若持有天數不到 30 天，為避免失真，直接顯示總報酬率
                   if (daysHeld < 30) {
-                      annualizedRoiPercent = roiPercent; 
+                      annualizedRoiPercent = roiPercent;
+                      sortAnnRoi = roi * 100;
                   } else {
                       annualizedRoiPercent = (annRoi * 100).toFixed(2);
+                      sortAnnRoi = annRoi * 100;
                   }
               }
           }
 
-          html += `
-            <div class="pt-3 pb-2">
-              <div class="flex justify-between items-center mb-2">
-                <div class="font-bold text-morandi-primary text-sm">${symbol} ${h.name}</div>
-                <div class="text-right">
-                  <span class="text-sm font-bold text-morandi-accent">${roiPercent}%</span>
-                  <span class="text-[10px] text-slate-400 block">總股息報酬率</span>
-                </div>
-              </div>
-              <div class="grid grid-cols-4 gap-2 text-center">
-                <div class="bg-slate-50 p-2 rounded border border-slate-100">
-                  <div class="text-[10px] text-slate-500 mb-0.5">總股數</div>
-                  <div class="font-bold text-slate-700 text-xs">${h.shares.toLocaleString()}</div>
-                </div>
-                <div class="bg-slate-50 p-2 rounded border border-slate-100">
-                  <div class="text-[10px] text-slate-500 mb-0.5">投入成本</div>
-                  <div class="font-bold text-slate-700 text-xs">$${Math.round(h.cost).toLocaleString()}</div>
-                </div>
-                <div class="bg-slate-50 p-2 rounded border border-slate-100">
-                  <div class="text-[10px] text-slate-500 mb-0.5">總配息</div>
-                  <div class="font-bold text-morandi-accent text-xs">+$${h.totalDividend.toLocaleString()}</div>
-                </div>
-                <div class="bg-slate-50 p-2 rounded border border-slate-100">
-                  <div class="text-[10px] text-slate-500 mb-0.5">年化(股息)</div>
-                  <div class="font-bold ${parseFloat(annualizedRoiPercent) > 0 ? 'text-morandi-accent' : 'text-slate-700'} text-xs">${annualizedRoiPercent}%</div>
-                </div>
-              </div>
-            </div>
-          `;
+          return {
+              symbol: symbol,
+              name: h.name,
+              shares: h.shares,
+              cost: h.cost,
+              totalDividend: h.totalDividend,
+              roiPercent: roiPercent,
+              annualizedRoiPercent: annualizedRoiPercent,
+              sortRoi: roi * 100,
+              sortAnnRoi: sortAnnRoi
+          };
       });
 
-      listEl.innerHTML = html || '<div class="text-center text-slate-400 py-4 text-xs">目前無持股資料</div>';
+      // 呼叫排序與渲染函式
+      renderHoldingsList();
+    }
+
+    // 處理排序與渲染清單
+    function renderHoldingsList() {
+      const listEl = document.getElementById('dashboard-holdings-list');
+      const sortType = document.getElementById('sort-holdings-select').value;
+      
+      if (!currentHoldingsSummary || currentHoldingsSummary.length === 0) {
+        listEl.innerHTML = '<div class="text-center text-slate-400 py-4 text-xs">目前無持股資料</div>';
+        return;
+      }
+
+      // 根據下拉選單進行排序
+      let sortedData = [...currentHoldingsSummary];
+      sortedData.sort((a, b) => {
+        if (sortType === 'annRoiDesc') return b.sortAnnRoi - a.sortAnnRoi;
+        if (sortType === 'roiDesc') return b.sortRoi - a.sortRoi;
+        if (sortType === 'costDesc') return b.cost - a.cost;
+        if (sortType === 'divDesc') return b.totalDividend - a.totalDividend;
+        return 0;
+      });
+
+      // 組合 HTML
+      let html = '';
+      sortedData.forEach(h => {
+        html += `
+          <div class="pt-3 pb-2">
+            <div class="flex justify-between items-center mb-2">
+              <div class="font-bold text-morandi-primary text-sm">${h.symbol} ${h.name}</div>
+              <div class="text-right">
+                <span class="text-sm font-bold text-morandi-accent">${h.roiPercent}%</span>
+                <span class="text-[10px] text-slate-400 block">總股息報酬率</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-4 gap-2 text-center">
+              <div class="bg-slate-50 p-2 rounded border border-slate-100">
+                <div class="text-[10px] text-slate-500 mb-0.5">總股數</div>
+                <div class="font-bold text-slate-700 text-xs">${h.shares.toLocaleString()}</div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded border border-slate-100">
+                <div class="text-[10px] text-slate-500 mb-0.5">投入成本</div>
+                <div class="font-bold text-slate-700 text-xs">$${Math.round(h.cost).toLocaleString()}</div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded border border-slate-100">
+                <div class="text-[10px] text-slate-500 mb-0.5">總配息</div>
+                <div class="font-bold text-morandi-accent text-xs">+$${h.totalDividend.toLocaleString()}</div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded border border-slate-100">
+                <div class="text-[10px] text-slate-500 mb-0.5">年化(股息)</div>
+                <div class="font-bold ${parseFloat(h.annualizedRoiPercent) > 0 ? 'text-morandi-accent' : 'text-slate-700'} text-xs">${h.annualizedRoiPercent}%</div>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      
+      listEl.innerHTML = html;
     }
 
     function computeMonthlyPayouts() {
@@ -745,17 +793,13 @@
 
     function renderCalendar() {
       const year = currentCalDate.getFullYear();
-      const month = currentCalDate.getMonth(); // 0-11
+      const month = currentCalDate.getMonth();
 
-      // 標題
       document.getElementById('calendar-month-title').innerText = `${year} 年 ${month + 1} 月`;
 
-      // 該月第一天是星期幾 (0是週日，6是週六)
       const firstDay = new Date(year, month, 1).getDay(); 
-      // 該月總共有幾天
       const daysInMonth = new Date(year, month + 1, 0).getDate(); 
 
-      // 建立該月份的事件地圖 (以日期字串 YYYY-MM-DD 為 Key)
       const eventsMap = {};
       calculatedDividends.forEach(d => {
         if (d.exDate) {
@@ -773,12 +817,10 @@
 
       let html = '';
       
-      // 補齊前面的空白格子
       for (let i = 0; i < firstDay; i++) {
         html += `<div class="h-[52px] bg-transparent"></div>`;
       }
 
-      // 繪製日期格子
       for (let i = 1; i <= daysInMonth; i++) {
         const dStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
         const hasEx = eventsMap[dStr] && eventsMap[dStr].ex.length > 0;
@@ -786,7 +828,6 @@
 
         let baseClasses = "h-[52px] rounded flex flex-col items-center justify-start py-1 cursor-pointer transition relative border ";
 
-        // 決定格子的視覺狀態
         if (dStr === selectedStr) {
           baseClasses += "border-morandi-primary bg-slate-100 font-bold text-morandi-primary ";
         } else if (dStr === todayStr) {
@@ -795,7 +836,6 @@
           baseClasses += "border-slate-100 bg-white hover:bg-slate-50 text-slate-600 ";
         }
 
-        // 事件點點
         let dotsHtml = '<div class="flex gap-1 mt-auto mb-0.5">';
         if (hasEx) dotsHtml += `<span class="w-1.5 h-1.5 rounded-full bg-amber-400" title="除息日"></span>`;
         if (hasPay) dotsHtml += `<span class="w-1.5 h-1.5 rounded-full bg-morandi-accent" title="發放日"></span>`;
@@ -817,7 +857,6 @@
       const listEl = document.getElementById('calendar-events-list');
       const selectedStr = getLocalYMD(selectedCalDate);
 
-      // 過濾出選取當日的除息與發放事件
       const exEvents = calculatedDividends.filter(d => d.exDate === selectedStr);
       const payEvents = calculatedDividends.filter(d => d.payDate === selectedStr);
 
@@ -831,7 +870,6 @@
         return;
       }
 
-      // 渲染除息事件
       if (exEvents.length > 0) {
         html += `<div class="text-[10px] font-bold text-amber-500 mt-3 mb-1.5 tracking-wider">除息日標示</div>`;
         exEvents.forEach(d => {
@@ -846,7 +884,6 @@
         });
       }
 
-      // 渲染發放事件
       if (payEvents.length > 0) {
         html += `<div class="text-[10px] font-bold text-morandi-accent mt-3 mb-1.5 tracking-wider">股息入帳</div>`;
         payEvents.forEach(d => {
