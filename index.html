@@ -62,6 +62,7 @@
     <button id="tab-btn-calendar" onclick="switchTab('calendar')" class="py-3 px-2">股息日曆</button>
     <button id="tab-btn-journal" onclick="switchTab('journal')" class="py-3 px-2">買賣紀錄</button>
     <button id="tab-btn-satellite" onclick="switchTab('satellite')" class="py-3 px-2">衛星持股</button>
+    <button id="tab-btn-trend" onclick="switchTab('trend')" class="py-3 px-2">配息趨勢</button>
   </nav>
 
   <!-- 主要內容區塊 -->
@@ -288,6 +289,24 @@
       <div class="space-y-3" id="satellite-list"></div>
     </section>
 
+    <!-- 6. 配息趨勢 (Dividend Trend) -->
+    <section id="sec-trend" class="space-y-4 hidden">
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
+        <div class="flex justify-between items-center">
+          <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">每股配息趨勢比較</h2>
+          <select id="trend-sort-select" onchange="renderTrendList()" class="text-xs border border-slate-200 rounded px-2 py-1 bg-slate-50 font-medium text-morandi-primary focus:outline-none">
+            <option value="growthDesc">近一年成長率 (高到低)</option>
+            <option value="growthAsc">近一年成長率 (低到高)</option>
+            <option value="cagrDesc">期間年化成長 (高到低)</option>
+            <option value="symbolAsc">股票代號</option>
+          </select>
+        </div>
+        <p class="text-[10px] text-slate-400">依「每股配息金額」逐年變化，判斷該檔股票配息是成長、持平還是衰退，可作為加碼判斷依據（純看股票本身配息趨勢，與你目前持有股數無關）</p>
+      </div>
+
+      <div class="space-y-3" id="trend-list"></div>
+    </section>
+
   </main>
 
   <script>
@@ -308,6 +327,7 @@
     // 衛星持股專用狀態
     let satelliteConfigList = [];   // 來自「衛星持股設定」試算表分頁的定期定額計畫清單
     let satelliteDrilldownSymbol = null; // 目前鑽取查看明細的股票代號；null 代表第一層（股票清單）
+    let currentTrendData = []; // 各股票逐年每股配息趨勢資料
 
     // 日曆專用狀態
     let currentCalDate = new Date(); // 畫面上顯示的月份基準點
@@ -355,7 +375,7 @@
     };
 
     function switchTab(tabName) {
-      ['dashboard', 'history', 'calendar', 'journal', 'satellite'].forEach(tab => {
+      ['dashboard', 'history', 'calendar', 'journal', 'satellite', 'trend'].forEach(tab => {
         document.getElementById(`sec-${tab}`).classList.add('hidden');
         document.getElementById(`tab-btn-${tab}`).classList.remove('active-tab');
       });
@@ -366,6 +386,7 @@
       if (tabName === 'history') renderHistory();
       if (tabName === 'calendar') renderCalendar();
       if (tabName === 'satellite') renderSatellite();
+      if (tabName === 'trend') renderTrend();
     }
 
     async function fetchSheetData() {
@@ -399,6 +420,7 @@
         if (!document.getElementById('sec-history').classList.contains('hidden')) renderHistory();
         if (!document.getElementById('sec-calendar').classList.contains('hidden')) renderCalendar();
         if (!document.getElementById('sec-satellite').classList.contains('hidden')) renderSatellite();
+        if (!document.getElementById('sec-trend').classList.contains('hidden')) renderTrend();
 
       } catch (err) {
         console.error("同步失敗：", err);
@@ -1213,6 +1235,119 @@
     function backToSatelliteList() {
       satelliteDrilldownSymbol = null;
       renderSatellite();
+    }
+
+    // ============================================================
+    // 配息趨勢 (Dividend Trend)
+    // - 純看每檔股票本身「每股配息金額」逐年變化，跟目前持有股數無關
+    // - 用來輔助判斷：哪一檔股票的配息持續成長、值得繼續加碼
+    // ============================================================
+
+    // 依 calculatedDividends 整理出每檔股票逐年的「每股配息合計」（同年若配息多次會加總，例如季配/月配 ETF）
+    function computeDividendTrend() {
+      const perSymbol = {};
+
+      calculatedDividends.forEach(d => {
+        if (!d.year) return;
+        if (!perSymbol[d.symbol]) {
+          perSymbol[d.symbol] = { name: d.name, yearMap: {} };
+        }
+        perSymbol[d.symbol].yearMap[d.year] = (perSymbol[d.symbol].yearMap[d.year] || 0) + d.perShare;
+      });
+
+      return Object.keys(perSymbol).map(symbol => {
+        const info = perSymbol[symbol];
+        const years = Object.keys(info.yearMap).sort();
+        const values = years.map(y => info.yearMap[y]);
+
+        let growthPercent = null; // 最近一年 vs 前一年
+        let cagrPercent = null;   // 全期間年化成長率
+        let status = '資料不足';
+
+        if (years.length >= 2) {
+          const latest = values[values.length - 1];
+          const prev = values[values.length - 2];
+          if (prev > 0) {
+            growthPercent = ((latest - prev) / prev) * 100;
+            if (growthPercent > 1) status = '成長';
+            else if (growthPercent < -1) status = '衰退';
+            else status = '持平';
+          }
+
+          const first = values[0];
+          const n = years.length - 1;
+          if (first > 0 && n > 0) {
+            cagrPercent = (Math.pow(latest / first, 1 / n) - 1) * 100;
+          }
+        }
+
+        return { symbol, name: info.name, years, values, growthPercent, cagrPercent, status };
+      });
+    }
+
+    function renderTrend() {
+      currentTrendData = computeDividendTrend();
+      renderTrendList();
+    }
+
+    function renderTrendList() {
+      const listEl = document.getElementById('trend-list');
+      const sortType = document.getElementById('trend-sort-select').value;
+
+      if (!currentTrendData || currentTrendData.length === 0) {
+        listEl.innerHTML = `<p class="text-slate-400 text-center py-4 text-xs">目前無足夠配息資料可供比較</p>`;
+        return;
+      }
+
+      const sorted = [...currentTrendData];
+      sorted.sort((a, b) => {
+        if (sortType === 'growthDesc') return (b.growthPercent ?? -Infinity) - (a.growthPercent ?? -Infinity);
+        if (sortType === 'growthAsc') return (a.growthPercent ?? Infinity) - (b.growthPercent ?? Infinity);
+        if (sortType === 'cagrDesc') return (b.cagrPercent ?? -Infinity) - (a.cagrPercent ?? -Infinity);
+        if (sortType === 'symbolAsc') return a.symbol.localeCompare(b.symbol);
+        return 0;
+      });
+
+      listEl.innerHTML = sorted.map(item => renderTrendCard(item)).join('');
+    }
+
+    function renderTrendCard(item) {
+      const maxVal = Math.max(...item.values, 0.0001);
+
+      const barsHtml = item.years.map((y, i) => {
+        const val = item.values[i];
+        const widthPct = Math.max((val / maxVal) * 100, 4); // 最小 4%，避免數值太小的年度完全看不到長條
+        return `
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] text-slate-400 w-9 shrink-0">${y}</span>
+            <div class="flex-1 bg-slate-100 rounded h-3 overflow-hidden">
+              <div class="h-3 rounded bg-morandi-accent" style="width:${widthPct}%"></div>
+            </div>
+            <span class="text-[10px] text-slate-500 w-14 text-right shrink-0">$${val.toFixed(2)}</span>
+          </div>
+        `;
+      }).join('');
+
+      let statusClass = 'bg-slate-100 text-slate-500';
+      if (item.status === '成長') statusClass = 'bg-morandi-lightAccent text-morandi-accent';
+      else if (item.status === '衰退') statusClass = 'bg-rose-50 text-rose-500';
+
+      const growthLabel = item.growthPercent === null ? '－' : `${item.growthPercent > 0 ? '+' : ''}${item.growthPercent.toFixed(1)}%`;
+      const cagrLabel = item.cagrPercent === null ? '－' : `${item.cagrPercent > 0 ? '+' : ''}${item.cagrPercent.toFixed(1)}%`;
+
+      return `
+        <div class="bg-white rounded-xl p-3 shadow-sm border border-morandi-border space-y-2 text-xs">
+          <div class="flex justify-between items-center">
+            <div class="font-bold text-morandi-primary">${item.symbol} ${item.name}</div>
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-medium ${statusClass}">${item.status}</span>
+          </div>
+          <div class="flex justify-between text-[10px] text-slate-400">
+            <span>最近一年變化：${growthLabel}</span>
+            <span>期間年化成長：${cagrLabel}</span>
+          </div>
+          <div class="space-y-1 pt-1">${barsHtml}</div>
+        </div>
+      `;
     }
   </script>
 </body>
