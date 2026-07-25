@@ -609,18 +609,19 @@
             cost: 0, 
             name: item['股票名稱'],
             totalDividend: 0,
-            firstBuyDate: tradeDate
+            buyLots: [] // 每一筆買進的 {cost, date}，供計算「成本加權平均持有天數」使用
           };
         }
 
         if (item['動作'] === '買進') {
           holdings[symbol].shares += shares;
-          holdings[symbol].cost += (shares * price) + fee;
-          totalCost += (shares * price) + fee;
+          const lotCost = (shares * price) + fee;
+          holdings[symbol].cost += lotCost;
+          totalCost += lotCost;
           totalShares += shares;
-          
-          if (!isNaN(tradeDate) && tradeDate < holdings[symbol].firstBuyDate) {
-              holdings[symbol].firstBuyDate = tradeDate;
+
+          if (!isNaN(tradeDate)) {
+            holdings[symbol].buyLots.push({ cost: lotCost, date: tradeDate });
           }
         }
       });
@@ -700,21 +701,27 @@
           const h = holdings[symbol];
           const roi = h.cost > 0 ? (h.totalDividend / h.cost) : 0;
           const roiPercent = (roi * 100).toFixed(2);
-          
+
           let annualizedRoiPercent = "0.00";
           let sortAnnRoi = 0; // 用於排序的精確數值
 
-          if (h.firstBuyDate && !isNaN(h.firstBuyDate)) {
-              const daysHeld = (today - h.firstBuyDate) / (1000 * 60 * 60 * 24);
-              if (daysHeld > 0) {
-                  const annRoi = Math.pow(1 + roi, 365.25 / daysHeld) - 1;
-                  if (daysHeld < 30) {
-                      annualizedRoiPercent = roiPercent;
-                      sortAnnRoi = roi * 100;
-                  } else {
-                      annualizedRoiPercent = (annRoi * 100).toFixed(2);
-                      sortAnnRoi = annRoi * 100;
-                  }
+          // 成本加權平均持有天數：分批買進時，每一筆錢依照「各自實際被放了多久」加權平均，
+          // 而不是整包成本都套用「第一次買進」的天數，避免持續加碼的股票年化報酬率被低估。
+          let weightedDaysSum = 0;
+          h.buyLots.forEach(lot => {
+            const days = (today - lot.date) / (1000 * 60 * 60 * 24);
+            weightedDaysSum += lot.cost * Math.max(days, 0);
+          });
+          const weightedAvgDays = h.cost > 0 ? weightedDaysSum / h.cost : 0;
+
+          if (weightedAvgDays > 0) {
+              const annRoi = Math.pow(1 + roi, 365.25 / weightedAvgDays) - 1;
+              if (weightedAvgDays < 30) {
+                  annualizedRoiPercent = roiPercent;
+                  sortAnnRoi = roi * 100;
+              } else {
+                  annualizedRoiPercent = (annRoi * 100).toFixed(2);
+                  sortAnnRoi = annRoi * 100;
               }
           }
 
