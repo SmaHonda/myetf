@@ -77,10 +77,14 @@
         </div>
         <div class="text-3xl font-bold tracking-tight" id="dash-total-value">$0</div>
 
-        <div class="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-700/60">
+        <div class="grid grid-cols-3 gap-2 text-xs pt-2 border-t border-slate-700/60">
           <div>
-            <div class="text-slate-400">總投入成本</div>
+            <div class="text-slate-400">原始本金投入</div>
             <div class="text-sm font-semibold text-slate-100" id="dash-total-cost">$0</div>
+          </div>
+          <div>
+            <div class="text-slate-400">衛星持股(配息再投入)</div>
+            <div class="text-sm font-semibold text-slate-100" id="dash-satellite-cost">$0</div>
           </div>
           <div>
             <div class="text-slate-400">歷史總配息 (自動試算)</div>
@@ -613,6 +617,7 @@
       renderYearlySummaryChart();
 
       let totalCost = 0;
+      let satelliteCost = 0; // 所有標記「衛星持股」的買進成本（用配息再投入的錢）
       let totalShares = 0;
       let holdings = {};
 
@@ -641,6 +646,10 @@
           holdings[symbol].cost += lotCost;
           totalCost += lotCost;
           totalShares += shares;
+
+          if (isSatelliteTrade(item)) {
+            satelliteCost += lotCost;
+          }
 
           if (!isNaN(tradeDate)) {
             holdings[symbol].buyLots.push({ cost: lotCost, date: tradeDate });
