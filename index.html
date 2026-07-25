@@ -326,12 +326,17 @@
       return v === '是' || v === 'true' || v === 'yes' || v === 'y' || v === '1' || v === 'v';
     }
 
-    // 依需要的數量動態產生一組色調平均分布、飽和度統一的莫蘭迪風配色，避免股票檔數超過固定色票數量時顏色重複或缺色
+    // 持股佔比圖表配色：沿用原本的莫蘭迪色系，並以相同風格延伸出更多顏色，避免股票檔數超過原本 5 色時沒有顏色可用
+    const MORANDI_PALETTE = [
+      '#2B3A4A', '#5A8F7B', '#6B7C85', '#94A3B8', '#CBD5E1',
+      '#4A6670', '#7C9885', '#8C7B6B', '#A6808C', '#B08D57',
+      '#9CAF88', '#C9ADA1'
+    ];
+
     function generateColorPalette(count) {
       const colors = [];
       for (let i = 0; i < count; i++) {
-        const hue = Math.round((360 / Math.max(count, 1)) * i);
-        colors.push(`hsl(${hue}, 32%, 46%)`);
+        colors.push(MORANDI_PALETTE[i % MORANDI_PALETTE.length]);
       }
       return colors;
     }
