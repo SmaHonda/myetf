@@ -89,6 +89,13 @@
       </div>
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
+        <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">每年投入與配息成長</h2>
+        <div class="h-52">
+          <canvas id="chart-yearly-summary"></canvas>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
         <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">持股統計</h2>
         <div class="grid grid-cols-4 gap-2 text-center pt-1" id="holding-summary-counts">
           <div class="bg-slate-50 p-2 rounded">
@@ -112,9 +119,10 @@
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
         <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">持股佔比分析</h2>
-        <div class="w-48 h-48 mx-auto">
+        <div class="w-40 h-40 mx-auto">
           <canvas id="chart-portfolio"></canvas>
         </div>
+        <div id="portfolio-legend" class="flex flex-wrap gap-x-3 gap-y-1.5 justify-center text-[10px] text-slate-600 pt-1 px-1"></div>
       </div>
 
       <!-- 更新：個別持股清單與排序 -->
@@ -292,6 +300,7 @@
     // 圖表與狀態
     let portfolioChart = null;
     let historyChart = null;
+    let yearlySummaryChart = null;
     let currentYearDividends = [];   
     let historyDrilldownMonth = null; 
     let currentHoldingsSummary = []; // 儲存各檔股票的統計資訊以供排序
@@ -315,6 +324,16 @@
       if (val === null || val === undefined) return false;
       const v = String(val).trim().toLowerCase();
       return v === '是' || v === 'true' || v === 'yes' || v === 'y' || v === '1' || v === 'v';
+    }
+
+    // 依需要的數量動態產生一組色調平均分布、飽和度統一的莫蘭迪風配色，避免股票檔數超過固定色票數量時顏色重複或缺色
+    function generateColorPalette(count) {
+      const colors = [];
+      for (let i = 0; i < count; i++) {
+        const hue = Math.round((360 / Math.max(count, 1)) * i);
+        colors.push(`hsl(${hue}, 32%, 46%)`);
+      }
+      return colors;
     }
 
     // 取得 YYYY-MM-DD 格式
@@ -499,7 +518,73 @@
       `).join('');
     }
 
+    // 依交易紀錄與試算配息，整理出每年「投入成本」與「領取配息」的加總
+    function computeYearlySummary() {
+      const investByYear = {};
+      const divByYear = {};
+
+      rawTradeData.forEach(item => {
+        if (item['動作'] !== '買進') return;
+        const dateStr = String(item['日期']).split('T')[0];
+        const year = dateStr.split('-')[0];
+        if (!year) return;
+
+        const shares = Number(item['股數']) || 0;
+        const price = Number(item['單價']) || 0;
+        const fee = Number(item['手續費']) || 0;
+        investByYear[year] = (investByYear[year] || 0) + shares * price + fee;
+      });
+
+      calculatedDividends.forEach(d => {
+        if (!d.year) return;
+        divByYear[d.year] = (divByYear[d.year] || 0) + d.totalPayout;
+      });
+
+      const years = Array.from(new Set([...Object.keys(investByYear), ...Object.keys(divByYear)])).sort();
+      const investData = years.map(y => Math.round(investByYear[y] || 0));
+      const divData = years.map(y => Math.round(divByYear[y] || 0));
+
+      return { years, investData, divData };
+    }
+
+    function renderYearlySummaryChart() {
+      const { years, investData, divData } = computeYearlySummary();
+
+      const ctx = document.getElementById('chart-yearly-summary').getContext('2d');
+      if (yearlySummaryChart) yearlySummaryChart.destroy();
+
+      if (years.length === 0) {
+        yearlySummaryChart = null;
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        return;
+      }
+
+      yearlySummaryChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: years,
+          datasets: [
+            { label: '年度投入成本', data: investData, backgroundColor: '#94A3B8', borderRadius: 4 },
+            { label: '年度領取配息', data: divData, backgroundColor: '#5A8F7B', borderRadius: 4 }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true, grid: { color: '#F1F5F9' }, ticks: { font: { size: 9 } } },
+            x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+          },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } }
+          }
+        }
+      });
+    }
+
     function renderDashboard() {
+      renderYearlySummaryChart();
+
       let totalCost = 0;
       let totalShares = 0;
       let holdings = {};
@@ -560,23 +645,49 @@
       const ctx = document.getElementById('chart-portfolio').getContext('2d');
       if (portfolioChart) portfolioChart.destroy();
 
+      const portfolioColors = generateColorPalette(labels.length);
+      const totalDataValue = dataValues.reduce((sum, v) => sum + v, 0) || 1;
+
       portfolioChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
           labels: labels,
           datasets: [{
             data: dataValues,
-            backgroundColor: ['#2B3A4A', '#5A8F7B', '#6B7C85', '#94A3B8', '#CBD5E1']
+            backgroundColor: portfolioColors,
+            borderColor: '#ffffff',
+            borderWidth: 1
           }]
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          cutout: '60%',
           plugins: {
-            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } }
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (item) => {
+                  const pct = ((item.parsed / totalDataValue) * 100).toFixed(1);
+                  return `${item.label}: $${Math.round(item.parsed).toLocaleString()} (${pct}%)`;
+                }
+              }
+            }
           }
         }
       });
+
+      // 自訂圖例：用 flex-wrap 呈現，不受圖表固定尺寸限制，避免項目過多時被裁切
+      const legendEl = document.getElementById('portfolio-legend');
+      legendEl.innerHTML = labels.map((label, i) => {
+        const pct = ((dataValues[i] / totalDataValue) * 100).toFixed(1);
+        return `
+          <span class="flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full inline-block shrink-0" style="background:${portfolioColors[i]}"></span>
+            <span>${label} ${pct}%</span>
+          </span>
+        `;
+      }).join('');
 
       // 4. 準備清單資料，以供後續排序及渲染
       const today = new Date();
