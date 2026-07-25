@@ -61,6 +61,7 @@
     <button id="tab-btn-history" onclick="switchTab('history')" class="py-3 px-2">股息歷程</button>
     <button id="tab-btn-calendar" onclick="switchTab('calendar')" class="py-3 px-2">股息日曆</button>
     <button id="tab-btn-journal" onclick="switchTab('journal')" class="py-3 px-2">買賣紀錄</button>
+    <button id="tab-btn-satellite" onclick="switchTab('satellite')" class="py-3 px-2">衛星持股</button>
   </nav>
 
   <!-- 主要內容區塊 -->
@@ -243,6 +244,11 @@
             </div>
           </div>
 
+          <label class="flex items-center gap-2 text-slate-600 bg-slate-50 border border-slate-200 rounded p-2 cursor-pointer">
+            <input type="checkbox" id="input-satellite" class="w-4 h-4 accent-morandi-accent">
+            <span>標記為衛星持股（用配息或其他資金定期定額買入）</span>
+          </label>
+
           <button type="submit" id="submit-btn" class="w-full bg-morandi-primary text-white py-2.5 rounded font-medium shadow-sm hover:bg-slate-800 transition">
             儲存紀錄至雲端試算表
           </button>
@@ -255,6 +261,23 @@
           <p class="text-slate-400 text-center py-4">連線中，載入資料庫中...</p>
         </div>
       </div>
+    </section>
+
+    <!-- 5. 衛星持股 (Satellite Holdings) -->
+    <section id="sec-satellite" class="space-y-4 hidden">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border">
+          <p class="text-[10px] text-slate-400 mb-1">累積衛星持股投入總金額</p>
+          <p class="text-lg font-bold text-morandi-primary" id="sat-total-invested">$0</p>
+        </div>
+        <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border">
+          <p class="text-[10px] text-slate-400 mb-1">目前每月定期定額總額</p>
+          <p class="text-lg font-bold text-morandi-accent" id="sat-monthly-total">$0</p>
+        </div>
+      </div>
+
+      <p class="text-[10px] text-slate-400 px-1">下方僅顯示已在「衛星持股設定」試算表分頁中設定定期定額的股票，點選卡片可查看歷次交易明細</p>
+      <div class="space-y-3" id="satellite-list"></div>
     </section>
 
   </main>
@@ -273,6 +296,10 @@
     let historyDrilldownMonth = null; 
     let currentHoldingsSummary = []; // 儲存各檔股票的統計資訊以供排序
 
+    // 衛星持股專用狀態
+    let satelliteConfigList = [];   // 來自「衛星持股設定」試算表分頁的定期定額計畫清單
+    let satelliteDrilldownSymbol = null; // 目前鑽取查看明細的股票代號；null 代表第一層（股票清單）
+
     // 日曆專用狀態
     let currentCalDate = new Date(); // 畫面上顯示的月份基準點
     let selectedCalDate = new Date(); // 使用者點選的特定日期
@@ -280,6 +307,14 @@
     function cleanSymbol(rawSymbol) {
       if (!rawSymbol) return "";
       return String(rawSymbol).trim().replace(/['"']/g, '');
+    }
+
+    // 判斷一筆交易是否被標記為「衛星持股」，容忍試算表手動填寫的各種寫法（是/TRUE/yes/1...）
+    function isSatelliteTrade(trade) {
+      const val = trade['衛星持股'];
+      if (val === null || val === undefined) return false;
+      const v = String(val).trim().toLowerCase();
+      return v === '是' || v === 'true' || v === 'yes' || v === 'y' || v === '1' || v === 'v';
     }
 
     // 取得 YYYY-MM-DD 格式
@@ -296,7 +331,7 @@
     };
 
     function switchTab(tabName) {
-      ['dashboard', 'history', 'calendar', 'journal'].forEach(tab => {
+      ['dashboard', 'history', 'calendar', 'journal', 'satellite'].forEach(tab => {
         document.getElementById(`sec-${tab}`).classList.add('hidden');
         document.getElementById(`tab-btn-${tab}`).classList.remove('active-tab');
       });
@@ -306,6 +341,7 @@
       if (tabName === 'dashboard') renderDashboard();
       if (tabName === 'history') renderHistory();
       if (tabName === 'calendar') renderCalendar();
+      if (tabName === 'satellite') renderSatellite();
     }
 
     async function fetchSheetData() {
@@ -324,6 +360,7 @@
         } else {
           rawTradeData = resJson.trades || [];
           dividendDatabase = resJson.dividends || {};
+          satelliteConfigList = resJson.satelliteConfig || [];
         }
 
         statusEl.innerText = "計算配息中...";
@@ -337,6 +374,7 @@
         
         if (!document.getElementById('sec-history').classList.contains('hidden')) renderHistory();
         if (!document.getElementById('sec-calendar').classList.contains('hidden')) renderCalendar();
+        if (!document.getElementById('sec-satellite').classList.contains('hidden')) renderSatellite();
 
       } catch (err) {
         console.error("同步失敗：", err);
@@ -416,7 +454,8 @@
         name: document.getElementById('input-name').value.trim(),
         price: document.getElementById('input-price').value,
         shares: document.getElementById('input-shares').value,
-        fee: document.getElementById('input-fee').value || 0
+        fee: document.getElementById('input-fee').value || 0,
+        isSatellite: document.getElementById('input-satellite').checked
       };
 
       fetch(GAS_API_URL, {
@@ -903,6 +942,146 @@
       }
 
       listEl.innerHTML = html;
+    }
+
+    // ============================================================
+    // 衛星持股 (Satellite Holdings)
+    // - 清單的主控權在「衛星持股設定」試算表分頁（決定哪些股票會顯示）
+    // - 交易紀錄裡標記「衛星持股」的每一筆買進，負責算錢、算股數
+    // ============================================================
+
+    // 整理出每檔股票被標記為衛星持股的交易，回傳 { [symbol]: { shares, cost, trades: [...] } }
+    function buildSatelliteTradeStats() {
+      const stats = {};
+
+      rawTradeData.forEach(item => {
+        if (item['動作'] !== '買進') return;
+        if (!isSatelliteTrade(item)) return;
+
+        const symbol = cleanSymbol(item['股票代號']);
+        const shares = Number(item['股數']) || 0;
+        const price = Number(item['單價']) || 0;
+        const fee = Number(item['手續費']) || 0;
+        const cost = shares * price + fee;
+
+        if (!stats[symbol]) stats[symbol] = { shares: 0, cost: 0, trades: [] };
+
+        stats[symbol].shares += shares;
+        stats[symbol].cost += cost;
+        stats[symbol].trades.push({
+          date: String(item['日期']).split('T')[0],
+          shares: shares,
+          price: price,
+          fee: fee,
+          cost: cost
+        });
+      });
+
+      return stats;
+    }
+
+    function renderSatellite() {
+      const tradeStats = buildSatelliteTradeStats();
+
+      // 總覽：累積衛星持股投入總金額（所有標記交易的金額加總，跟設定清單無關）
+      const totalInvested = Object.values(tradeStats).reduce((sum, s) => sum + s.cost, 0);
+      // 總覽：目前每月定期定額總額（「衛星持股設定」分頁裡各檔金額加總）
+      const monthlyTotal = satelliteConfigList.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+
+      document.getElementById('sat-total-invested').innerText = `$${Math.round(totalInvested).toLocaleString()}`;
+      document.getElementById('sat-monthly-total').innerText = `$${Math.round(monthlyTotal).toLocaleString()}`;
+
+      renderSatelliteList(tradeStats);
+    }
+
+    function renderSatelliteList(tradeStats) {
+      const listEl = document.getElementById('satellite-list');
+
+      if (satelliteDrilldownSymbol) {
+        renderSatelliteDetail(listEl, tradeStats, satelliteDrilldownSymbol);
+      } else {
+        renderSatelliteSummary(listEl, tradeStats);
+      }
+    }
+
+    // 第一層：只列出「衛星持股設定」分頁裡有的股票
+    function renderSatelliteSummary(listEl, tradeStats) {
+      if (!satelliteConfigList || satelliteConfigList.length === 0) {
+        listEl.innerHTML = `<p class="text-slate-400 text-center py-4 text-xs">尚未設定任何衛星持股，請至 Google 試算表「衛星持股設定」分頁新增</p>`;
+        return;
+      }
+
+      const html = satelliteConfigList.map(cfg => {
+        const stat = tradeStats[cfg.symbol] || { shares: 0, cost: 0, trades: [] };
+        const lots = (stat.shares / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+        return `
+          <button onclick="showSatelliteDetail('${cfg.symbol}')" class="w-full text-left bg-white rounded-xl p-3 shadow-sm border border-morandi-border hover:border-morandi-accent transition text-xs space-y-2">
+            <div class="flex justify-between items-center">
+              <div class="font-bold text-morandi-primary">${cfg.symbol} ${cfg.name || ''}</div>
+              <span class="text-slate-300 text-base">›</span>
+            </div>
+            <div class="flex justify-between items-center text-[10px] text-slate-400">
+              <span>定期定額：$${Number(cfg.amount || 0).toLocaleString()} / ${cfg.day || '未設定扣款日'}</span>
+              <span>共 ${stat.trades.length} 筆紀錄</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <div class="bg-slate-50 rounded p-2 border border-slate-100">
+                <div class="text-[10px] text-slate-500">累積股數</div>
+                <div class="font-bold text-slate-700">${stat.shares.toLocaleString()} 股（約 ${lots} 張）</div>
+              </div>
+              <div class="bg-slate-50 rounded p-2 border border-slate-100">
+                <div class="text-[10px] text-slate-500">累積投入金額</div>
+                <div class="font-bold text-morandi-accent">$${Math.round(stat.cost).toLocaleString()}</div>
+              </div>
+            </div>
+          </button>
+        `;
+      }).join('');
+
+      listEl.innerHTML = html;
+    }
+
+    // 第二層：該股票所有標記為衛星持股的交易明細
+    function renderSatelliteDetail(listEl, tradeStats, symbol) {
+      const cfg = satelliteConfigList.find(c => c.symbol === symbol);
+      const stat = tradeStats[symbol] || { shares: 0, cost: 0, trades: [] };
+      const trades = stat.trades.slice().sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
+
+      let html = `
+        <div class="flex items-center justify-between px-1">
+          <button onclick="backToSatelliteList()" class="flex items-center gap-1 text-xs text-morandi-secondary hover:text-morandi-primary font-medium">
+            <span>←</span><span>返回衛星持股清單</span>
+          </button>
+          <span class="text-xs font-bold text-morandi-primary">${symbol} ${cfg ? cfg.name : ''} 交易明細</span>
+        </div>
+      `;
+
+      if (trades.length === 0) {
+        html += `<p class="text-slate-400 text-center py-4 text-xs">目前無標記為衛星持股的交易紀錄</p>`;
+      } else {
+        html += trades.map(t => `
+          <div class="bg-white rounded-xl p-3 shadow-sm border border-morandi-border flex justify-between items-center text-xs">
+            <div>
+              <div class="font-bold text-morandi-primary">${t.date}</div>
+              <div class="text-[10px] text-slate-400">單價 $${t.price} × ${t.shares.toLocaleString()} 股${t.fee ? `（手續費 $${t.fee}）` : ''}</div>
+            </div>
+            <div class="text-sm font-bold text-morandi-accent">$${Math.round(t.cost).toLocaleString()}</div>
+          </div>
+        `).join('');
+      }
+
+      listEl.innerHTML = html;
+    }
+
+    function showSatelliteDetail(symbol) {
+      satelliteDrilldownSymbol = symbol;
+      renderSatellite();
+    }
+
+    function backToSatelliteList() {
+      satelliteDrilldownSymbol = null;
+      renderSatellite();
     }
   </script>
 </body>
