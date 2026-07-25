@@ -1015,6 +1015,13 @@
         const stat = tradeStats[cfg.symbol] || { shares: 0, cost: 0, trades: [] };
         const lots = (stat.shares / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
+        // 找出最早一筆交易日期，作為「開始定期定額日」
+        let startDateLabel = '尚無交易紀錄';
+        if (stat.trades.length > 0) {
+          const earliestDate = stat.trades.reduce((min, t) => (t.date < min ? t.date : min), stat.trades[0].date);
+          startDateLabel = earliestDate;
+        }
+
         return `
           <button onclick="showSatelliteDetail('${cfg.symbol}')" class="w-full text-left bg-white rounded-xl p-3 shadow-sm border border-morandi-border hover:border-morandi-accent transition text-xs space-y-2">
             <div class="flex justify-between items-center">
@@ -1025,6 +1032,7 @@
               <span>定期定額：$${Number(cfg.amount || 0).toLocaleString()} / ${cfg.day || '未設定扣款日'}</span>
               <span>共 ${stat.trades.length} 筆紀錄</span>
             </div>
+            <div class="text-[10px] text-slate-400">開始定期定額日：${startDateLabel}</div>
             <div class="grid grid-cols-2 gap-2 pt-1">
               <div class="bg-slate-50 rounded p-2 border border-slate-100">
                 <div class="text-[10px] text-slate-500">累積股數</div>
@@ -1046,7 +1054,7 @@
     function renderSatelliteDetail(listEl, tradeStats, symbol) {
       const cfg = satelliteConfigList.find(c => c.symbol === symbol);
       const stat = tradeStats[symbol] || { shares: 0, cost: 0, trades: [] };
-      const trades = stat.trades.slice().sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
+      const trades = stat.trades.slice().sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
 
       let html = `
         <div class="flex items-center justify-between px-1">
