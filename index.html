@@ -162,6 +162,14 @@
         </select>
       </div>
 
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border flex justify-between items-center">
+        <div>
+          <div class="text-xs font-bold text-morandi-muted uppercase tracking-wider">平均每月領息</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">已公告總額 ÷ 已知配息月份數</div>
+        </div>
+        <div class="text-xl font-bold text-morandi-accent" id="history-avg-monthly">$0</div>
+      </div>
+
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
         <div class="flex justify-between items-center">
           <h2 class="text-sm font-bold text-morandi-primary" id="history-chart-title">各月份領息統計</h2>
@@ -172,7 +180,13 @@
         </div>
       </div>
 
-      <p class="text-[10px] text-slate-400 px-1">點選下方月份（或長條圖）可查看該月各檔個股的配息明細</p>
+      <div class="flex justify-between items-center px-1">
+        <p class="text-[10px] text-slate-400">點選下方月份（或長條圖）可查看該月各檔個股的配息明細</p>
+        <select id="history-sort-select" onchange="changeHistorySortOrder()" class="text-[10px] border border-slate-200 rounded px-2 py-1 bg-slate-50 font-medium text-morandi-primary focus:outline-none shrink-0">
+          <option value="desc">日期：近到遠</option>
+          <option value="asc">日期：遠到近</option>
+        </select>
+      </div>
       <div class="space-y-3" id="history-timeline-list"></div>
     </section>
 
@@ -270,6 +284,7 @@
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-3">
         <h2 class="text-sm font-bold text-morandi-primary">已同步買賣紀錄</h2>
+        <p class="text-[10px] text-slate-400">依年份（近到遠）→ 股票（買入股數多到少）→ 單筆交易（日期近到遠）逐層查看</p>
         <div id="journal-list" class="space-y-2 text-xs divide-y divide-slate-100">
           <p class="text-slate-400 text-center py-4">連線中，載入資料庫中...</p>
         </div>
@@ -326,12 +341,18 @@
     let yearlySummaryChart = null;
     let currentYearDividends = [];   
     let historyDrilldownMonth = null; 
+    let historySortOrder = 'desc'; // 股息歷程清單排序：desc=日期近到遠（預設）、asc=日期遠到近
     let currentHoldingsSummary = []; // 儲存各檔股票的統計資訊以供排序
 
     // 衛星持股專用狀態
     let satelliteConfigList = [];   // 來自「衛星持股設定」試算表分頁的定期定額計畫清單
     let satelliteDrilldownSymbol = null; // 目前鑽取查看明細的股票代號；null 代表第一層（股票清單）
     let currentTrendData = []; // 各股票逐年每股配息趨勢資料
+    let stockInfoConfigList = []; // 來自「股票基本資料設定」試算表分頁（保管銀行等，純手動維護）
+
+    // 買賣紀錄專用狀態（三層：年份 → 股票 → 單筆紀錄）
+    let journalDrilldownYear = null;
+    let journalDrilldownSymbol = null;
 
     // 日曆專用狀態
     let currentCalDate = new Date(); // 畫面上顯示的月份基準點
@@ -363,6 +384,38 @@
         colors.push(MORANDI_PALETTE[i % MORANDI_PALETTE.length]);
       }
       return colors;
+    }
+
+    // 取得某檔股票的保管銀行（來自「股票基本資料設定」分頁，純手動維護，FinMind 無此資料集）
+    function getCustodianBank(symbol) {
+      const cfg = stockInfoConfigList.find(c => c.symbol === symbol);
+      return cfg && cfg.custodian ? cfg.custodian : '尚未設定';
+    }
+
+    // 依「近 12 個月內、該股票有幾個不同月份配息」自動判斷配息頻率，不需要額外資料源
+    // （直接沿用已經抓回來的配息資料，用滾動 12 個月窗口判斷，能反映該股票近期實際的配息節奏，
+    //   即使該股票過去曾經改變配息頻率，也不會被舊資料誤導）
+    function classifyDividendFrequency(symbol) {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+      const recentExDates = new Set();
+
+      calculatedDividends.forEach(d => {
+        if (d.symbol !== symbol) return;
+        const exDate = new Date(d.exDate);
+        if (!isNaN(exDate) && exDate >= cutoff && exDate <= now) {
+          recentExDates.add(d.exDate);
+        }
+      });
+
+      const count = recentExDates.size;
+      if (count <= 0) return '尚無資料';
+      if (count === 1) return '年配';
+      if (count === 2) return '半年配';
+      if (count === 4) return '季配';
+      if (count === 6) return '雙月配';
+      if (count >= 11) return '月配';
+      return `${count}次/年`;
     }
 
     // 取得 YYYY-MM-DD 格式
@@ -410,6 +463,7 @@
           rawTradeData = resJson.trades || [];
           dividendDatabase = resJson.dividends || {};
           satelliteConfigList = resJson.satelliteConfig || [];
+          stockInfoConfigList = resJson.stockInfoConfig || [];
         }
 
         statusEl.innerText = "計算配息中...";
@@ -528,6 +582,11 @@
       });
     }
 
+    function getTradeYear(item) {
+      const dateStr = String(item['日期']).split('T')[0];
+      return dateStr.split('-')[0] || '未知';
+    }
+
     function renderJournalList() {
       const container = document.getElementById('journal-list');
       if (!rawTradeData || rawTradeData.length === 0) {
@@ -535,18 +594,165 @@
         return;
       }
 
-      container.innerHTML = rawTradeData.slice().reverse().map(item => `
-        <div class="pt-2 flex justify-between items-center">
+      if (journalDrilldownSymbol) {
+        renderJournalRecords(container);
+      } else if (journalDrilldownYear) {
+        renderJournalStockList(container);
+      } else {
+        renderJournalYearList(container);
+      }
+    }
+
+    // 第一層：依年份分組，由近到遠
+    function renderJournalYearList(container) {
+      const yearMap = {};
+
+      rawTradeData.forEach(item => {
+        const year = getTradeYear(item);
+        if (!yearMap[year]) yearMap[year] = { count: 0, buyCost: 0 };
+        yearMap[year].count++;
+
+        if (item['動作'] === '買進') {
+          const shares = Number(item['股數']) || 0;
+          const price = Number(item['單價']) || 0;
+          const fee = Number(item['手續費']) || 0;
+          yearMap[year].buyCost += shares * price + fee;
+        }
+      });
+
+      const years = Object.keys(yearMap).sort((a, b) => b.localeCompare(a)); // 由近到遠
+
+      container.innerHTML = years.map(year => `
+        <button onclick="showJournalYear('${year}')" class="w-full text-left pt-3 pb-3 flex justify-between items-center hover:bg-slate-50 transition rounded px-1">
           <div>
-            <div class="font-bold text-morandi-primary">${cleanSymbol(item['股票代號'])} ${item['股票名稱'] || ''}</div>
-            <div class="text-[10px] text-slate-400">${item['日期']} | <span class="${item['動作'] === '買進' ? 'text-emerald-600' : 'text-rose-600'} font-medium">${item['動作']}</span></div>
+            <div class="font-bold text-morandi-primary">${year} 年</div>
+            <div class="text-[10px] text-slate-400">共 ${yearMap[year].count} 筆交易</div>
           </div>
-          <div class="text-right">
-            <div class="font-semibold text-morandi-text">$${Number(item['單價']).toLocaleString()} × ${Number(item['股數']).toLocaleString()}股</div>
-            <div class="text-[10px] text-slate-400">手續費: $${Number(item['手續費'] || 0)}</div>
+          <div class="flex items-center gap-2">
+            <div class="text-right">
+              <div class="text-[10px] text-slate-400">買進總金額</div>
+              <div class="text-sm font-bold text-morandi-primary">$${Math.round(yearMap[year].buyCost).toLocaleString()}</div>
+            </div>
+            <span class="text-slate-300 text-base">›</span>
           </div>
-        </div>
+        </button>
       `).join('');
+    }
+
+    // 第二層：該年度依股票分組，買入總股數由多到少
+    function renderJournalStockList(container) {
+      const year = journalDrilldownYear;
+      const stockMap = {};
+
+      rawTradeData.forEach(item => {
+        if (getTradeYear(item) !== year) return;
+        const symbol = cleanSymbol(item['股票代號']);
+        if (!stockMap[symbol]) stockMap[symbol] = { name: item['股票名稱'] || symbol, buyShares: 0, buyCost: 0, count: 0 };
+
+        stockMap[symbol].count++;
+        if (item['動作'] === '買進') {
+          const shares = Number(item['股數']) || 0;
+          const price = Number(item['單價']) || 0;
+          const fee = Number(item['手續費']) || 0;
+          stockMap[symbol].buyShares += shares;
+          stockMap[symbol].buyCost += shares * price + fee;
+        }
+      });
+
+      const symbols = Object.keys(stockMap).sort((a, b) => stockMap[b].buyShares - stockMap[a].buyShares);
+
+      let html = `
+        <div class="flex items-center justify-between px-1 pt-1 pb-2">
+          <button onclick="backToJournalYearList()" class="flex items-center gap-1 text-xs text-morandi-secondary hover:text-morandi-primary font-medium">
+            <span>←</span><span>返回年度總覽</span>
+          </button>
+          <span class="text-xs font-bold text-morandi-primary">${year} 年　各股票交易</span>
+        </div>
+      `;
+
+      if (symbols.length === 0) {
+        html += `<p class="text-slate-400 text-center py-4 text-xs">該年度無交易紀錄</p>`;
+      } else {
+        html += symbols.map(symbol => {
+          const s = stockMap[symbol];
+          return `
+            <button onclick="showJournalStock('${symbol}')" class="w-full text-left bg-white rounded-xl p-3 border border-morandi-border hover:border-morandi-accent transition text-xs space-y-1.5 mb-2 block">
+              <div class="flex justify-between items-center">
+                <div class="font-bold text-morandi-primary">${symbol} ${s.name}</div>
+                <span class="text-slate-300 text-base">›</span>
+              </div>
+              <div class="flex justify-between text-[10px] text-slate-400">
+                <span>共 ${s.count} 筆交易</span>
+                <span>買入總股數 ${s.buyShares.toLocaleString()} 股</span>
+              </div>
+              <div class="text-right text-sm font-bold text-morandi-primary">買入成本 $${Math.round(s.buyCost).toLocaleString()}</div>
+            </button>
+          `;
+        }).join('');
+      }
+
+      container.innerHTML = html;
+    }
+
+    // 第三層：該年度＋該股票的單筆交易，日期由近到遠
+    function renderJournalRecords(container) {
+      const year = journalDrilldownYear;
+      const symbol = journalDrilldownSymbol;
+
+      const records = rawTradeData.filter(item => getTradeYear(item) === year && cleanSymbol(item['股票代號']) === symbol);
+      records.sort((a, b) => (String(a['日期']) > String(b['日期']) ? -1 : 1)); // 由近到遠
+
+      const name = records.length > 0 ? (records[0]['股票名稱'] || symbol) : symbol;
+
+      let html = `
+        <div class="flex items-center justify-between px-1 pt-1 pb-2">
+          <button onclick="backToJournalStockList()" class="flex items-center gap-1 text-xs text-morandi-secondary hover:text-morandi-primary font-medium">
+            <span>←</span><span>返回 ${year} 年股票總覽</span>
+          </button>
+          <span class="text-xs font-bold text-morandi-primary">${symbol} ${name}</span>
+        </div>
+      `;
+
+      if (records.length === 0) {
+        html += `<p class="text-slate-400 text-center py-4 text-xs">無交易紀錄</p>`;
+      } else {
+        html += records.map(item => `
+          <div class="pt-2 pb-2 flex justify-between items-center border-b border-slate-100">
+            <div>
+              <div class="font-bold text-morandi-primary">${cleanSymbol(item['股票代號'])} ${item['股票名稱'] || ''}</div>
+              <div class="text-[10px] text-slate-400">${item['日期']} | <span class="${item['動作'] === '買進' ? 'text-emerald-600' : 'text-rose-600'} font-medium">${item['動作']}</span></div>
+            </div>
+            <div class="text-right">
+              <div class="font-semibold text-morandi-text">$${Number(item['單價']).toLocaleString()} × ${Number(item['股數']).toLocaleString()}股</div>
+              <div class="text-[10px] text-slate-400">手續費: $${Number(item['手續費'] || 0)}</div>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      container.innerHTML = html;
+    }
+
+    function showJournalYear(year) {
+      journalDrilldownYear = year;
+      journalDrilldownSymbol = null;
+      renderJournalList();
+    }
+
+    function showJournalStock(symbol) {
+      journalDrilldownSymbol = symbol;
+      renderJournalList();
+    }
+
+    function backToJournalYearList() {
+      journalDrilldownYear = null;
+      journalDrilldownSymbol = null;
+      renderJournalList();
+    }
+
+    function backToJournalStockList() {
+      journalDrilldownSymbol = null;
+      renderJournalList();
     }
 
     // 依交易紀錄與試算配息，整理出每年「投入成本」與「領取配息」的加總
@@ -801,13 +1007,14 @@
       sortedData.forEach(h => {
         html += `
           <div class="pt-3 pb-2">
-            <div class="flex justify-between items-center mb-2">
+            <div class="flex justify-between items-center mb-1">
               <div class="font-bold text-morandi-primary text-sm">${h.symbol} ${h.name}</div>
               <div class="text-right">
                 <span class="text-sm font-bold text-morandi-accent">${h.roiPercent}%</span>
                 <span class="text-[10px] text-slate-400 block">總股息報酬率</span>
               </div>
             </div>
+            <div class="text-[10px] text-slate-400 mb-2">保管銀行：${getCustodianBank(h.symbol)}　・　配息頻率：${classifyDividendFrequency(h.symbol)}</div>
             <div class="grid grid-cols-4 gap-2 text-center">
               <div class="bg-slate-50 p-2 rounded border border-slate-100">
                 <div class="text-[10px] text-slate-500 mb-0.5">總股數</div>
@@ -852,6 +1059,12 @@
 
       document.getElementById('history-year-total').innerText = `${selectedYear} 總計: $${yearTotal.toLocaleString()}`;
 
+      // 平均每月領息 = 該年度已公告的配息總額 ÷ 該年度「已知有配息」的月份數
+      // （不是除以 12 個月，而是除以實際出現配息紀錄的月份數，過去只配一次的股票、或今年只到 8 月都能合理反映）
+      const distinctMonths = new Set(currentYearDividends.map(d => d.month)).size;
+      const avgMonthly = distinctMonths > 0 ? Math.round(yearTotal / distinctMonths) : 0;
+      document.getElementById('history-avg-monthly').innerText = `$${avgMonthly.toLocaleString()}`;
+
       const ctx = document.getElementById('chart-dividend-history').getContext('2d');
       if (historyChart) historyChart.destroy();
 
@@ -888,6 +1101,11 @@
       renderHistoryList(selectedYear);
     }
 
+    function changeHistorySortOrder() {
+      historySortOrder = document.getElementById('history-sort-select').value;
+      renderHistoryList(document.getElementById('history-year-select').value);
+    }
+
     function renderHistoryList(selectedYear) {
       const timelineEl = document.getElementById('history-timeline-list');
       if (historyDrilldownMonth) {
@@ -901,9 +1119,13 @@
       const monthlyPayouts = computeMonthlyPayouts();
       const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
 
+      const indices = [];
+      for (let i = 0; i < 12; i++) indices.push(i);
+      if (historySortOrder === 'desc') indices.reverse(); // 近到遠：12月排在最前面
+
       let html = '';
-      for (let i = 0; i < 12; i++) {
-        if (monthlyPayouts[i] <= 0) continue;
+      indices.forEach(i => {
+        if (monthlyPayouts[i] <= 0) return;
         const monthStr = String(i + 1).padStart(2, '0');
         const countInMonth = currentYearDividends.filter(d => d.month === monthStr).length;
 
@@ -922,7 +1144,7 @@
             </div>
           </button>
         `;
-      }
+      });
 
       timelineEl.innerHTML = html || `<p class="text-slate-400 text-center py-4 text-xs">該年份無領息紀錄</p>`;
     }
@@ -932,7 +1154,11 @@
       const monthLabel = `${selectedYear} 年 ${parseInt(monthStr, 10)} 月`;
       const monthDividends = currentYearDividends
         .filter(d => d.month === monthStr)
-        .sort((a, b) => (a.exDate > b.exDate ? 1 : a.exDate < b.exDate ? -1 : 0));
+        .sort((a, b) => {
+          if (a.exDate === b.exDate) return 0;
+          if (historySortOrder === 'desc') return a.exDate > b.exDate ? -1 : 1; // 近到遠
+          return a.exDate > b.exDate ? 1 : -1; // 遠到近
+        });
 
       let html = `
         <div class="flex items-center justify-between px-1">
