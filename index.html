@@ -56,14 +56,14 @@
   </header>
 
   <!-- 主頁面分頁切換選單 -->
-  <nav class="bg-white border-b border-morandi-border sticky top-[57px] z-40 flex justify-around text-sm text-morandi-muted">
-    <button id="tab-btn-dashboard" onclick="switchTab('dashboard')" class="py-3 px-2 active-tab">投資總覽</button>
-    <button id="tab-btn-history" onclick="switchTab('history')" class="py-3 px-2">股息歷程</button>
-    <button id="tab-btn-calendar" onclick="switchTab('calendar')" class="py-3 px-2">股息日曆</button>
-    <button id="tab-btn-journal" onclick="switchTab('journal')" class="py-3 px-2">買賣紀錄</button>
-    <button id="tab-btn-satellite" onclick="switchTab('satellite')" class="py-3 px-2">衛星持股</button>
-    <button id="tab-btn-trend" onclick="switchTab('trend')" class="py-3 px-2">配息趨勢</button>
-    <button id="tab-btn-monthdist" onclick="switchTab('monthdist')" class="py-3 px-2">除息分布</button>
+  <nav class="bg-white border-b border-morandi-border sticky top-[57px] z-40 flex overflow-x-auto text-sm text-morandi-muted [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <button id="tab-btn-dashboard" onclick="switchTab('dashboard')" class="py-3 px-3 whitespace-nowrap shrink-0 active-tab">投資總覽</button>
+    <button id="tab-btn-history" onclick="switchTab('history')" class="py-3 px-3 whitespace-nowrap shrink-0">股息歷程</button>
+    <button id="tab-btn-calendar" onclick="switchTab('calendar')" class="py-3 px-3 whitespace-nowrap shrink-0">股息日曆</button>
+    <button id="tab-btn-journal" onclick="switchTab('journal')" class="py-3 px-3 whitespace-nowrap shrink-0">買賣紀錄</button>
+    <button id="tab-btn-satellite" onclick="switchTab('satellite')" class="py-3 px-3 whitespace-nowrap shrink-0">衛星持股</button>
+    <button id="tab-btn-trend" onclick="switchTab('trend')" class="py-3 px-3 whitespace-nowrap shrink-0">配息趨勢</button>
+    <button id="tab-btn-monthdist" onclick="switchTab('monthdist')" class="py-3 px-3 whitespace-nowrap shrink-0">除息分布</button>
   </nav>
 
   <!-- 主要內容區塊 -->
