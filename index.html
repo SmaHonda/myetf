@@ -63,6 +63,7 @@
     <button id="tab-btn-journal" onclick="switchTab('journal')" class="py-3 px-2">買賣紀錄</button>
     <button id="tab-btn-satellite" onclick="switchTab('satellite')" class="py-3 px-2">衛星持股</button>
     <button id="tab-btn-trend" onclick="switchTab('trend')" class="py-3 px-2">配息趨勢</button>
+    <button id="tab-btn-monthdist" onclick="switchTab('monthdist')" class="py-3 px-2">除息分布</button>
   </nav>
 
   <!-- 主要內容區塊 -->
@@ -326,6 +327,20 @@
       <div class="space-y-3" id="trend-list"></div>
     </section>
 
+    <!-- 7. 除息分布 (Ex-Dividend Month Distribution) -->
+    <section id="sec-monthdist" class="space-y-4 hidden">
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
+        <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">全年除息月份分布</h2>
+        <p class="text-[10px] text-slate-400">統計歷史上每個月「曾經除息過」的股票檔數，不分年份，同一檔股票同一個月只計算一次</p>
+        <div class="h-52">
+          <canvas id="chart-month-dist"></canvas>
+        </div>
+      </div>
+
+      <p class="text-[10px] text-slate-400 px-1">下方依月份列出對應會除息的股票代號</p>
+      <div class="space-y-3" id="monthdist-list"></div>
+    </section>
+
   </main>
 
   <script>
@@ -339,6 +354,7 @@
     let portfolioChart = null;
     let historyChart = null;
     let yearlySummaryChart = null;
+    let monthDistChart = null;
     let currentYearDividends = [];   
     let historyDrilldownMonth = null; 
     let historySortOrder = 'desc'; // 股息歷程清單排序：desc=日期近到遠（預設）、asc=日期遠到近
@@ -432,7 +448,7 @@
     };
 
     function switchTab(tabName) {
-      ['dashboard', 'history', 'calendar', 'journal', 'satellite', 'trend'].forEach(tab => {
+      ['dashboard', 'history', 'calendar', 'journal', 'satellite', 'trend', 'monthdist'].forEach(tab => {
         document.getElementById(`sec-${tab}`).classList.add('hidden');
         document.getElementById(`tab-btn-${tab}`).classList.remove('active-tab');
       });
@@ -444,6 +460,7 @@
       if (tabName === 'calendar') renderCalendar();
       if (tabName === 'satellite') renderSatellite();
       if (tabName === 'trend') renderTrend();
+      if (tabName === 'monthdist') renderMonthDist();
     }
 
     async function fetchSheetData() {
@@ -479,6 +496,7 @@
         if (!document.getElementById('sec-calendar').classList.contains('hidden')) renderCalendar();
         if (!document.getElementById('sec-satellite').classList.contains('hidden')) renderSatellite();
         if (!document.getElementById('sec-trend').classList.contains('hidden')) renderTrend();
+        if (!document.getElementById('sec-monthdist').classList.contains('hidden')) renderMonthDist();
 
       } catch (err) {
         console.error("同步失敗：", err);
@@ -1586,6 +1604,92 @@
           <div class="space-y-1 pt-1">${barsHtml}</div>
         </div>
       `;
+    }
+
+    // ============================================================
+    // 除息分布 (Ex-Dividend Month Distribution)
+    // - 不分年份，純看「歷史上這個月曾經除息過哪些股票」，用來判斷全年除息月份是否分散
+    // ============================================================
+
+    // 依 calculatedDividends 的除息日（不是發放日）整理出 1~12 月各自曾經除息過的股票代號集合
+    function computeMonthDistribution() {
+      const monthMap = {};
+      for (let m = 1; m <= 12; m++) monthMap[m] = new Set();
+
+      calculatedDividends.forEach(d => {
+        const exDate = new Date(d.exDate);
+        if (isNaN(exDate)) return;
+        const m = exDate.getMonth() + 1;
+        monthMap[m].add(d.symbol);
+      });
+
+      return monthMap;
+    }
+
+    function renderMonthDist() {
+      const monthMap = computeMonthDistribution();
+      const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+      const counts = [];
+      for (let m = 1; m <= 12; m++) counts.push(monthMap[m].size);
+
+      const ctx = document.getElementById('chart-month-dist').getContext('2d');
+      if (monthDistChart) monthDistChart.destroy();
+
+      monthDistChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: monthNames,
+          datasets: [{
+            label: '除息檔數',
+            data: counts,
+            backgroundColor: '#5A8F7B',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 9 } }, grid: { color: '#F1F5F9' } },
+            x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (item) => `${item.parsed.y} 檔股票曾在此月除息`
+              }
+            }
+          }
+        }
+      });
+
+      renderMonthDistList(monthMap, monthNames);
+    }
+
+    function renderMonthDistList(monthMap, monthNames) {
+      const listEl = document.getElementById('monthdist-list');
+
+      let html = '';
+      for (let m = 1; m <= 12; m++) {
+        const symbols = Array.from(monthMap[m]).sort();
+
+        html += `
+          <div class="bg-white rounded-xl p-3 shadow-sm border border-morandi-border text-xs space-y-2">
+            <div class="flex justify-between items-center">
+              <div class="font-bold text-morandi-primary">${monthNames[m - 1]}</div>
+              <span class="text-[10px] text-slate-400">共 ${symbols.length} 檔</span>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              ${symbols.length > 0
+                ? symbols.map(s => `<span class="text-[10px] bg-morandi-lightAccent text-morandi-accent px-2 py-0.5 rounded-full font-medium">${s}</span>`).join('')
+                : '<span class="text-[10px] text-slate-300">無除息紀錄</span>'}
+            </div>
+          </div>
+        `;
+      }
+
+      listEl.innerHTML = html;
     }
   </script>
 </body>
