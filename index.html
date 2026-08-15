@@ -300,6 +300,11 @@
             <span>標記為衛星持股（用配息或其他資金定期定額買入）</span>
           </label>
 
+          <label class="flex items-center gap-2 text-slate-600 bg-slate-50 border border-slate-200 rounded p-2 cursor-pointer">
+            <input type="checkbox" id="input-stock-dividend" class="w-4 h-4 accent-morandi-accent">
+            <span>標記為配股（股票股利，通常成本填 $0）</span>
+          </label>
+
           <button type="submit" id="submit-btn" class="w-full bg-morandi-primary text-white py-2.5 rounded font-medium shadow-sm hover:bg-slate-800 transition">
             儲存紀錄至雲端試算表
           </button>
@@ -406,6 +411,14 @@
     // 判斷一筆交易是否被標記為「衛星持股」，容忍試算表手動填寫的各種寫法（是/TRUE/yes/1...）
     function isSatelliteTrade(trade) {
       const val = trade['衛星持股'];
+      if (val === null || val === undefined) return false;
+      const v = String(val).trim().toLowerCase();
+      return v === '是' || v === 'true' || v === 'yes' || v === 'y' || v === '1' || v === 'v';
+    }
+
+    // 判斷一筆交易是否被標記為「配股」（股票股利，通常成本為 $0），寫法同樣容忍手動填寫的各種格式
+    function isStockDividendTrade(trade) {
+      const val = trade['配股'];
       if (val === null || val === undefined) return false;
       const v = String(val).trim().toLowerCase();
       return v === '是' || v === 'true' || v === 'yes' || v === 'y' || v === '1' || v === 'v';
@@ -636,7 +649,8 @@
         price: document.getElementById('input-price').value,
         shares: document.getElementById('input-shares').value,
         fee: document.getElementById('input-fee').value || 0,
-        isSatellite: document.getElementById('input-satellite').checked
+        isSatellite: document.getElementById('input-satellite').checked,
+        isStockDividend: document.getElementById('input-stock-dividend').checked
       };
 
       fetch(GAS_API_URL, {
@@ -919,6 +933,7 @@
             cost: 0, 
             name: item['股票名稱'],
             totalDividend: 0,
+            stockDividendShares: 0, // 標記為「配股」的股數加總，通常成本為 $0
             buyLots: [] // 每一筆買進的 {cost, date}，供計算「成本加權平均持有天數」使用
           };
         }
@@ -932,6 +947,10 @@
 
           if (isSatelliteTrade(item)) {
             satelliteCost += lotCost;
+          }
+
+          if (isStockDividendTrade(item)) {
+            holdings[symbol].stockDividendShares += shares;
           }
 
           if (!isNaN(tradeDate)) {
@@ -1047,6 +1066,7 @@
           const marketValue = hasPrice ? h.shares * priceInfo.price : 0;
           const unrealizedPL = hasPrice ? marketValue - h.cost : 0;
           const unrealizedPLPercent = hasPrice && h.cost > 0 ? (unrealizedPL / h.cost) * 100 : 0;
+          const stockDividendValue = hasPrice ? h.stockDividendShares * priceInfo.price : 0;
 
           return {
               symbol: symbol,
@@ -1061,7 +1081,9 @@
               hasPrice: hasPrice,
               marketValue: marketValue,
               unrealizedPL: unrealizedPL,
-              unrealizedPLPercent: unrealizedPLPercent
+              unrealizedPLPercent: unrealizedPLPercent,
+              stockDividendShares: h.stockDividendShares,
+              stockDividendValue: stockDividendValue
           };
       });
 
@@ -1155,6 +1177,9 @@
                 return `<div class="text-[10px] text-slate-300 mt-2 pt-2 border-t border-slate-100">尚無最新股價資料，請至試算表選單「股息管理」→「更新最新收盤價」</div>`;
               }
               const plColor = h.unrealizedPL >= 0 ? 'text-morandi-accent' : 'text-rose-500';
+              const stockDividendLine = h.stockDividendShares > 0
+                ? `<div class="flex justify-between items-center text-[10px] text-slate-400"><span>其中配股 ${h.stockDividendShares.toLocaleString()} 股</span><span class="text-morandi-accent font-medium">約 $${Math.round(h.stockDividendValue).toLocaleString()} 市值（成本 $0）</span></div>`
+                : '';
               return `
                 <div class="mt-2 pt-2 border-t border-slate-100 space-y-1">
                   <div class="flex justify-between items-center text-[10px] text-slate-400">
@@ -1165,6 +1190,7 @@
                     <span>目前市值 $${Math.round(h.marketValue).toLocaleString()}</span>
                     <span class="${plColor} font-bold text-xs">${h.unrealizedPL >= 0 ? '+' : ''}$${Math.round(h.unrealizedPL).toLocaleString()}（${h.unrealizedPLPercent >= 0 ? '+' : ''}${h.unrealizedPLPercent.toFixed(2)}%）</span>
                   </div>
+                  ${stockDividendLine}
                 </div>
               `;
             })()}
