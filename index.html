@@ -1035,7 +1035,19 @@
       const today = new Date();
       currentHoldingsSummary = labels.map(symbol => {
           const h = holdings[symbol];
-          const roi = h.cost > 0 ? (h.totalDividend / h.cost) : 0;
+
+          const priceInfo = latestPricesMap[symbol];
+          const hasPrice = !!(priceInfo && priceInfo.price);
+          const marketValue = hasPrice ? h.shares * priceInfo.price : 0;
+          const unrealizedPL = hasPrice ? marketValue - h.cost : 0;
+          const unrealizedPLPercent = hasPrice && h.cost > 0 ? (unrealizedPL / h.cost) * 100 : 0;
+
+          // 配股市值：成本已計為 $0，這裡用最新收盤價估出「這些白拿股票值多少錢」，
+          // 直接併入「總配息」，這樣才能反映一檔股票真正的「總殖利率」（現金股利＋股票股利）
+          const stockDividendValue = hasPrice ? h.stockDividendShares * priceInfo.price : 0;
+          const combinedTotalDividend = h.totalDividend + stockDividendValue;
+
+          const roi = h.cost > 0 ? (combinedTotalDividend / h.cost) : 0;
           const roiPercent = (roi * 100).toFixed(2);
 
           let annualizedRoiPercent = "0.00";
@@ -1061,19 +1073,13 @@
               }
           }
 
-          const priceInfo = latestPricesMap[symbol];
-          const hasPrice = !!(priceInfo && priceInfo.price);
-          const marketValue = hasPrice ? h.shares * priceInfo.price : 0;
-          const unrealizedPL = hasPrice ? marketValue - h.cost : 0;
-          const unrealizedPLPercent = hasPrice && h.cost > 0 ? (unrealizedPL / h.cost) * 100 : 0;
-          const stockDividendValue = hasPrice ? h.stockDividendShares * priceInfo.price : 0;
-
           return {
               symbol: symbol,
               name: h.name,
               shares: h.shares,
               cost: h.cost,
-              totalDividend: h.totalDividend,
+              totalDividend: h.totalDividend, // 純現金股利（配息歷程等其他分頁沿用這個純現金數字，不受影響）
+              combinedTotalDividend: combinedTotalDividend, // 現金股利＋配股市值，卡片上的「總配息」顯示這個
               roiPercent: roiPercent,
               annualizedRoiPercent: annualizedRoiPercent,
               sortRoi: roi * 100,
@@ -1129,7 +1135,7 @@
         if (sortType === 'annRoiDesc') return b.sortAnnRoi - a.sortAnnRoi;
         if (sortType === 'roiDesc') return b.sortRoi - a.sortRoi;
         if (sortType === 'costDesc') return b.cost - a.cost;
-        if (sortType === 'divDesc') return b.totalDividend - a.totalDividend;
+        if (sortType === 'divDesc') return b.combinedTotalDividend - a.combinedTotalDividend;
         if (sortType === 'curYieldDesc') {
           const yieldA = getCurrentYieldInfo(a.symbol);
           const yieldB = getCurrentYieldInfo(b.symbol);
@@ -1149,7 +1155,7 @@
               <div class="font-bold text-morandi-primary text-sm">${h.symbol} ${h.name}</div>
               <div class="text-right">
                 <span class="text-sm font-bold text-morandi-accent">${h.roiPercent}%</span>
-                <span class="text-[10px] text-slate-400 block">總股息報酬率</span>
+                <span class="text-[10px] text-slate-400 block">總股息報酬率${h.stockDividendValue > 0 ? '(含配股)' : ''}</span>
               </div>
             </div>
             <div class="text-[10px] text-slate-400 mb-2">保管銀行：${getCustodianBank(h.symbol)}　・　配息頻率：${classifyDividendFrequency(h.symbol)}</div>
@@ -1163,8 +1169,8 @@
                 <div class="font-bold text-slate-700 text-xs">$${Math.round(h.cost).toLocaleString()}</div>
               </div>
               <div class="bg-slate-50 p-2 rounded border border-slate-100">
-                <div class="text-[10px] text-slate-500 mb-0.5">總配息</div>
-                <div class="font-bold text-morandi-accent text-xs">+$${h.totalDividend.toLocaleString()}</div>
+                <div class="text-[10px] text-slate-500 mb-0.5">總配息${h.stockDividendValue > 0 ? '(含配股)' : ''}</div>
+                <div class="font-bold text-morandi-accent text-xs">+$${Math.round(h.combinedTotalDividend).toLocaleString()}</div>
               </div>
               <div class="bg-slate-50 p-2 rounded border border-slate-100">
                 <div class="text-[10px] text-slate-500 mb-0.5">年化(股息)</div>
@@ -1178,7 +1184,7 @@
               }
               const plColor = h.unrealizedPL >= 0 ? 'text-morandi-accent' : 'text-rose-500';
               const stockDividendLine = h.stockDividendShares > 0
-                ? `<div class="flex justify-between items-center text-[10px] text-slate-400"><span>其中配股 ${h.stockDividendShares.toLocaleString()} 股</span><span class="text-morandi-accent font-medium">約 $${Math.round(h.stockDividendValue).toLocaleString()} 市值（成本 $0）</span></div>`
+                ? `<div class="flex justify-between items-center text-[10px] text-slate-400"><span>其中配股 ${h.stockDividendShares.toLocaleString()} 股</span><span class="text-morandi-accent font-medium">約 $${Math.round(h.stockDividendValue).toLocaleString()} 已計入總配息（成本 $0）</span></div>`
                 : '';
               return `
                 <div class="mt-2 pt-2 border-t border-slate-100 space-y-1">
