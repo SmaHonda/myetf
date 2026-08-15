@@ -140,6 +140,7 @@
             <option value="roiDesc">總報酬率 (高到低)</option>
             <option value="costDesc">投入成本 (高到低)</option>
             <option value="divDesc">總配息額 (高到低)</option>
+            <option value="curYieldDesc">目前殖利率 (高到低)</option>
           </select>
         </div>
         <div id="dashboard-holdings-list" class="divide-y divide-slate-100">
@@ -1053,6 +1054,13 @@
         if (sortType === 'roiDesc') return b.sortRoi - a.sortRoi;
         if (sortType === 'costDesc') return b.cost - a.cost;
         if (sortType === 'divDesc') return b.totalDividend - a.totalDividend;
+        if (sortType === 'curYieldDesc') {
+          const yieldA = getCurrentYieldInfo(a.symbol);
+          const yieldB = getCurrentYieldInfo(b.symbol);
+          const valA = yieldA.hasPrice ? yieldA.yieldPercent : -Infinity; // 無股價資料的排到最後
+          const valB = yieldB.hasPrice ? yieldB.yieldPercent : -Infinity;
+          return valB - valA;
+        }
         return 0;
       });
 
