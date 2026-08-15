@@ -365,6 +365,7 @@
     let satelliteDrilldownSymbol = null; // 目前鑽取查看明細的股票代號；null 代表第一層（股票清單）
     let currentTrendData = []; // 各股票逐年每股配息趨勢資料
     let stockInfoConfigList = []; // 來自「股票基本資料設定」試算表分頁（保管銀行等，純手動維護）
+    let latestPricesMap = {}; // 來自「最新股價」試算表分頁：symbol -> {price, date}
 
     // 買賣紀錄專用狀態（三層：年份 → 股票 → 單筆紀錄）
     let journalDrilldownYear = null;
@@ -402,6 +403,40 @@
       return colors;
     }
 
+    // 近 12 個月「每股配息」加總（用除息日判斷是否落在滾動 12 個月窗口內），做為估算目前殖利率的分子
+    function getTrailing12moDividendPerShare(symbol) {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+      let sum = 0;
+
+      calculatedDividends.forEach(d => {
+        if (d.symbol !== symbol) return;
+        const exDate = new Date(d.exDate);
+        if (!isNaN(exDate) && exDate >= cutoff && exDate <= now) {
+          sum += d.perShare;
+        }
+      });
+
+      return sum;
+    }
+
+    // 目前殖利率 = 近12個月每股配息 ÷ 最新收盤價（收盤價來自「最新股價」分頁，需手動更新）
+    function getCurrentYieldInfo(symbol) {
+      const priceInfo = latestPricesMap[symbol];
+      if (!priceInfo || !priceInfo.price) {
+        return { hasPrice: false };
+      }
+
+      const dividendPerShare = getTrailing12moDividendPerShare(symbol);
+      const yieldPercent = (dividendPerShare / priceInfo.price) * 100;
+
+      return {
+        hasPrice: true,
+        price: priceInfo.price,
+        date: priceInfo.date,
+        yieldPercent: yieldPercent
+      };
+    }
     // 取得某檔股票的保管銀行（來自「股票基本資料設定」分頁，純手動維護，FinMind 無此資料集）
     function getCustodianBank(symbol) {
       const cfg = stockInfoConfigList.find(c => c.symbol === symbol);
@@ -481,6 +516,7 @@
           dividendDatabase = resJson.dividends || {};
           satelliteConfigList = resJson.satelliteConfig || [];
           stockInfoConfigList = resJson.stockInfoConfig || [];
+          latestPricesMap = resJson.latestPrices || {};
         }
 
         statusEl.innerText = "計算配息中...";
@@ -1051,6 +1087,18 @@
                 <div class="font-bold ${parseFloat(h.annualizedRoiPercent) > 0 ? 'text-morandi-accent' : 'text-slate-700'} text-xs">${h.annualizedRoiPercent}%</div>
               </div>
             </div>
+            ${(() => {
+              const yieldInfo = getCurrentYieldInfo(h.symbol);
+              if (!yieldInfo.hasPrice) {
+                return `<div class="text-[10px] text-slate-300 mt-2 pt-2 border-t border-slate-100">尚無最新股價資料，請至試算表選單「股息管理」→「更新最新收盤價」</div>`;
+              }
+              return `
+                <div class="flex justify-between items-center mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400">
+                  <span>最新收盤價 $${yieldInfo.price.toLocaleString()}（${yieldInfo.date}）</span>
+                  <span class="text-morandi-accent font-bold text-xs">目前殖利率 ${yieldInfo.yieldPercent.toFixed(2)}%</span>
+                </div>
+              `;
+            })()}
           </div>
         `;
       });
