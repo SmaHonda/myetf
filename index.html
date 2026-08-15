@@ -95,6 +95,28 @@
       </div>
 
       <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
+        <div class="flex justify-between items-center">
+          <span class="text-xs font-bold text-morandi-muted tracking-wider uppercase">目前市值（依最新收盤價估算）</span>
+        </div>
+        <div class="text-2xl font-bold text-morandi-primary" id="dash-market-value">$0</div>
+        <div class="grid grid-cols-3 gap-2 text-xs pt-2 border-t border-slate-100">
+          <div>
+            <div class="text-slate-400">未實現損益</div>
+            <div class="text-sm font-semibold" id="dash-unrealized-pl">$0</div>
+          </div>
+          <div>
+            <div class="text-slate-400">未實現損益率</div>
+            <div class="text-sm font-semibold" id="dash-unrealized-pl-pct">0%</div>
+          </div>
+          <div>
+            <div class="text-slate-400">含息總報酬率</div>
+            <div class="text-sm font-semibold text-morandi-accent" id="dash-total-return-pct">0%</div>
+          </div>
+        </div>
+        <div class="text-[10px] text-slate-300" id="dash-market-value-note"></div>
+      </div>
+
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-morandi-border space-y-2">
         <h2 class="text-xs font-bold text-morandi-muted tracking-wider uppercase">每年投入與配息成長</h2>
         <div class="h-52">
           <canvas id="chart-yearly-summary"></canvas>
@@ -1020,6 +1042,12 @@
               }
           }
 
+          const priceInfo = latestPricesMap[symbol];
+          const hasPrice = !!(priceInfo && priceInfo.price);
+          const marketValue = hasPrice ? h.shares * priceInfo.price : 0;
+          const unrealizedPL = hasPrice ? marketValue - h.cost : 0;
+          const unrealizedPLPercent = hasPrice && h.cost > 0 ? (unrealizedPL / h.cost) * 100 : 0;
+
           return {
               symbol: symbol,
               name: h.name,
@@ -1029,9 +1057,35 @@
               roiPercent: roiPercent,
               annualizedRoiPercent: annualizedRoiPercent,
               sortRoi: roi * 100,
-              sortAnnRoi: sortAnnRoi
+              sortAnnRoi: sortAnnRoi,
+              hasPrice: hasPrice,
+              marketValue: marketValue,
+              unrealizedPL: unrealizedPL,
+              unrealizedPLPercent: unrealizedPLPercent
           };
       });
+
+      // 5. 彙總「目前市值 / 未實現損益 / 含息總報酬率」（只計入有最新股價資料的持股）
+      const pricedHoldings = currentHoldingsSummary.filter(h => h.hasPrice);
+      const totalMarketValue = pricedHoldings.reduce((sum, h) => sum + h.marketValue, 0);
+      const pricedCost = pricedHoldings.reduce((sum, h) => sum + h.cost, 0);
+      const totalUnrealizedPL = totalMarketValue - pricedCost;
+      const totalUnrealizedPLPercent = pricedCost > 0 ? (totalUnrealizedPL / pricedCost) * 100 : 0;
+      const pricedDividend = pricedHoldings.reduce((sum, h) => sum + h.totalDividend, 0);
+      const totalReturnPercent = pricedCost > 0 ? ((totalMarketValue + pricedDividend - pricedCost) / pricedCost) * 100 : 0;
+
+      document.getElementById('dash-market-value').innerText = `$${Math.round(totalMarketValue).toLocaleString()}`;
+      const plColor = totalUnrealizedPL >= 0 ? 'text-morandi-accent' : 'text-rose-500';
+      document.getElementById('dash-unrealized-pl').innerText = `${totalUnrealizedPL >= 0 ? '+' : ''}$${Math.round(totalUnrealizedPL).toLocaleString()}`;
+      document.getElementById('dash-unrealized-pl').className = `text-sm font-semibold ${plColor}`;
+      document.getElementById('dash-unrealized-pl-pct').innerText = `${totalUnrealizedPLPercent >= 0 ? '+' : ''}${totalUnrealizedPLPercent.toFixed(2)}%`;
+      document.getElementById('dash-unrealized-pl-pct').className = `text-sm font-semibold ${plColor}`;
+      document.getElementById('dash-total-return-pct').innerText = `${totalReturnPercent >= 0 ? '+' : ''}${totalReturnPercent.toFixed(2)}%`;
+
+      const uncoveredCount = labels.length - pricedHoldings.length;
+      document.getElementById('dash-market-value-note').innerText = uncoveredCount > 0
+        ? `尚有 ${uncoveredCount} 檔股票無最新股價資料，未計入市值（請至試算表選單「股息管理」→「更新最新收盤價」）`
+        : '';
 
       // 呼叫排序與渲染函式
       renderHoldingsList();
@@ -1100,10 +1154,17 @@
               if (!yieldInfo.hasPrice) {
                 return `<div class="text-[10px] text-slate-300 mt-2 pt-2 border-t border-slate-100">尚無最新股價資料，請至試算表選單「股息管理」→「更新最新收盤價」</div>`;
               }
+              const plColor = h.unrealizedPL >= 0 ? 'text-morandi-accent' : 'text-rose-500';
               return `
-                <div class="flex justify-between items-center mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400">
-                  <span>最新收盤價 $${yieldInfo.price.toLocaleString()}（${yieldInfo.date}）</span>
-                  <span class="text-morandi-accent font-bold text-xs">目前殖利率 ${yieldInfo.yieldPercent.toFixed(2)}%</span>
+                <div class="mt-2 pt-2 border-t border-slate-100 space-y-1">
+                  <div class="flex justify-between items-center text-[10px] text-slate-400">
+                    <span>最新收盤價 $${yieldInfo.price.toLocaleString()}（${yieldInfo.date}）</span>
+                    <span class="text-morandi-accent font-bold text-xs">目前殖利率 ${yieldInfo.yieldPercent.toFixed(2)}%</span>
+                  </div>
+                  <div class="flex justify-between items-center text-[10px] text-slate-400">
+                    <span>目前市值 $${Math.round(h.marketValue).toLocaleString()}</span>
+                    <span class="${plColor} font-bold text-xs">${h.unrealizedPL >= 0 ? '+' : ''}$${Math.round(h.unrealizedPL).toLocaleString()}（${h.unrealizedPLPercent >= 0 ? '+' : ''}${h.unrealizedPLPercent.toFixed(2)}%）</span>
+                  </div>
                 </div>
               `;
             })()}
