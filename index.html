@@ -456,21 +456,44 @@
       return sum;
     }
 
-    // 目前殖利率 = 近12個月每股配息 ÷ 最新收盤價（收盤價來自「最新股價」分頁，需手動更新）
-    function getCurrentYieldInfo(symbol) {
+    // 目前殖利率 = 現金股利殖利率 ＋ 近12個月配股換算殖利率（收盤價來自「最新股價」分頁，需手動更新）
+    // - 現金股利殖利率：近12個月每股現金股利 ÷ 最新收盤價
+    // - 配股換算殖利率：近12個月收到的配股股數 ÷ 目前總股數（相當於「白拿的股票貢獻了多少百分比」）
+    function getCurrentYieldInfo(symbol, holdingShares) {
       const priceInfo = latestPricesMap[symbol];
       if (!priceInfo || !priceInfo.price) {
         return { hasPrice: false };
       }
 
-      const dividendPerShare = getTrailing12moDividendPerShare(symbol);
-      const yieldPercent = (dividendPerShare / priceInfo.price) * 100;
+      const cashDividendPerShare = getTrailing12moDividendPerShare(symbol);
+      const cashYieldPercent = (cashDividendPerShare / priceInfo.price) * 100;
+
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+      let stockDividendSharesRecent = 0;
+
+      rawTradeData.forEach(item => {
+        if (cleanSymbol(item['股票代號']) !== symbol) return;
+        if (item['動作'] !== '買進') return;
+        if (!isStockDividendTrade(item)) return;
+
+        const dateStr = String(item['日期']).split('T')[0];
+        const tradeDate = new Date(dateStr);
+        if (!isNaN(tradeDate) && tradeDate >= cutoff && tradeDate <= now) {
+          stockDividendSharesRecent += Number(item['股數']) || 0;
+        }
+      });
+
+      const stockDividendYieldPercent = holdingShares > 0 ? (stockDividendSharesRecent / holdingShares) * 100 : 0;
+      const yieldPercent = cashYieldPercent + stockDividendYieldPercent;
 
       return {
         hasPrice: true,
         price: priceInfo.price,
         date: priceInfo.date,
-        yieldPercent: yieldPercent
+        yieldPercent: yieldPercent,
+        cashYieldPercent: cashYieldPercent,
+        stockDividendYieldPercent: stockDividendYieldPercent
       };
     }
     // 取得某檔股票的保管銀行（來自「股票基本資料設定」分頁，純手動維護，FinMind 無此資料集）
@@ -1137,8 +1160,8 @@
         if (sortType === 'costDesc') return b.cost - a.cost;
         if (sortType === 'divDesc') return b.combinedTotalDividend - a.combinedTotalDividend;
         if (sortType === 'curYieldDesc') {
-          const yieldA = getCurrentYieldInfo(a.symbol);
-          const yieldB = getCurrentYieldInfo(b.symbol);
+          const yieldA = getCurrentYieldInfo(a.symbol, a.shares);
+          const yieldB = getCurrentYieldInfo(b.symbol, b.shares);
           const valA = yieldA.hasPrice ? yieldA.yieldPercent : -Infinity; // 無股價資料的排到最後
           const valB = yieldB.hasPrice ? yieldB.yieldPercent : -Infinity;
           return valB - valA;
@@ -1178,7 +1201,7 @@
               </div>
             </div>
             ${(() => {
-              const yieldInfo = getCurrentYieldInfo(h.symbol);
+              const yieldInfo = getCurrentYieldInfo(h.symbol, h.shares);
               if (!yieldInfo.hasPrice) {
                 return `<div class="text-[10px] text-slate-300 mt-2 pt-2 border-t border-slate-100">尚無最新股價資料，請至試算表選單「股息管理」→「更新最新收盤價」</div>`;
               }
@@ -1190,7 +1213,7 @@
                 <div class="mt-2 pt-2 border-t border-slate-100 space-y-1">
                   <div class="flex justify-between items-center text-[10px] text-slate-400">
                     <span>最新收盤價 $${yieldInfo.price.toLocaleString()}（${yieldInfo.date}）</span>
-                    <span class="text-morandi-accent font-bold text-xs">目前殖利率 ${yieldInfo.yieldPercent.toFixed(2)}%</span>
+                    <span class="text-morandi-accent font-bold text-xs">目前殖利率${yieldInfo.stockDividendYieldPercent > 0 ? '(含配股)' : ''} ${yieldInfo.yieldPercent.toFixed(2)}%</span>
                   </div>
                   <div class="flex justify-between items-center text-[10px] text-slate-400">
                     <span>目前市值 $${Math.round(h.marketValue).toLocaleString()}</span>
