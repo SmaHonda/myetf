@@ -456,17 +456,19 @@
       return sum;
     }
 
-    // 目前殖利率 = 現金股利殖利率 ＋ 近12個月配股換算殖利率（收盤價來自「最新股價」分頁，需手動更新）
-    // - 現金股利殖利率：近12個月每股現金股利 ÷ 最新收盤價
-    // - 配股換算殖利率：近12個月收到的配股股數 ÷ 目前總股數（相當於「白拿的股票貢獻了多少百分比」）
+    // 目前殖利率 = (近12個月現金股利總額 ＋ 近12個月配股市值) ÷ 目前總市值 × 100
+    // - 分子：現金股利總額 = 近12個月每股現金股利 × 目前總股數；配股市值 = 近12個月配股股數 × 最新收盤價
+    // - 分母：目前總市值 = 目前總股數 × 最新收盤價
+    // （用「總金額 ÷ 總市值」一次算，而不是拆成現金/配股兩個百分比分別算再相加，
+    //   數學上等價、但避免了分開計算時「配股股數 ÷ 事後股數」造成的些微低估）
     function getCurrentYieldInfo(symbol, holdingShares) {
       const priceInfo = latestPricesMap[symbol];
-      if (!priceInfo || !priceInfo.price) {
+      if (!priceInfo || !priceInfo.price || holdingShares <= 0) {
         return { hasPrice: false };
       }
 
       const cashDividendPerShare = getTrailing12moDividendPerShare(symbol);
-      const cashYieldPercent = (cashDividendPerShare / priceInfo.price) * 100;
+      const cashDividendTotal = cashDividendPerShare * holdingShares;
 
       const now = new Date();
       const cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
@@ -484,8 +486,12 @@
         }
       });
 
-      const stockDividendYieldPercent = holdingShares > 0 ? (stockDividendSharesRecent / holdingShares) * 100 : 0;
-      const yieldPercent = cashYieldPercent + stockDividendYieldPercent;
+      const stockDividendValueRecent = stockDividendSharesRecent * priceInfo.price;
+      const totalMarketValue = holdingShares * priceInfo.price;
+
+      const cashYieldPercent = (cashDividendTotal / totalMarketValue) * 100;
+      const stockDividendYieldPercent = (stockDividendValueRecent / totalMarketValue) * 100;
+      const yieldPercent = ((cashDividendTotal + stockDividendValueRecent) / totalMarketValue) * 100;
 
       return {
         hasPrice: true,
